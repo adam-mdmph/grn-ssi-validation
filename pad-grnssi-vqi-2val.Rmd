@@ -1,0 +1,1687 @@
+---
+title: Risk Model Validation and Refinement for Groin SSI after revascularization for PAD
+author: Hana Shafique and Adam Johnson
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  word_document:
+knit: (function(input, ...) {rmarkdown::render(input, output_file = paste0(tools::file_path_sans_ext(basename(input)), '-', Sys.Date(), '.docx'))})
+---
+
+# Purpose Statement:
+
+This project aims externally validate previously developed risk models for surgical site infection, following open lower extremity revascularization for peripheral artery disease through a groin incision.
+
+# Data:
+
+The national Vascular Quality Initiative suprainguinal and infrainguinal registries from 2011-2023 were queried for open lower extremity revascularizations that included a groin incision for femoral artery exposure with an indication of peripheral occlusive disease.
+
+
+```{r packages, message=FALSE, warning=FALSE, results='hide'}
+library(tidyverse)
+library(finalfit)
+library(tidymodels)
+library(probably)
+library(survival)
+library(survminer)
+library(predtools)
+library(magrittr)
+library(Hmisc)
+library(labelled)
+```
+
+```{r import and select relevant variables, echo=FALSE, warning=FALSE, message=FALSE}
+vqi_pad_grninf_clean <- readRDS("P:/Pro00113988 - PAD Risk Models/DataRepo/VQI/Analysis Data Files/vqi_pad.rds")
+
+grninf_preop_v <- c("POSTOP_SSI","GRAFTINF","RTOR","RTORINF", "WCOMP", "POSTOP_LOS",
+                    "PRIMPROCID","REGIONID","CENTERID","PHYSICIANID","PATIENTID",
+                    "RUCA1","RUCA2","ADI_NATRANK_MEDIAN",
+                    "SURGYEAR","SURGMONTH","SURGWEEKDAY","GENDER","RACE","HTCM","WTKG",
+                    "PRIMARYINSURER","ETHNICITY","AGE", "TRANSFER",
+                    "PRIOR_CVD","PREOP_SMOKING","HX_SMOKING_COUNSELING","QUIT_SMKG_DAYS",
+                    "HTN","DIABETES","HBA1C",
+                    "R_PRIOR_BYPASS","PRIOR_CEACAS","R_PRIOR_CEA","R_ANEURREP","PRIOR_ANEURREP",
+                    "EXERCISE_PROGRAM","R_PTASTENT","R_PRIOR_MAJAMP",
+                    "CAD","PRIOR_CABG","PRIOR_PCI","R_PRIOR_CABGPTCA","PRIOR_CHF","PREOP_DYSRHYTHMIA","COPD",
+                    "DIALYSIS","CREATININE","STRESS",
+                    "LIVINGSTATUS","PREOP_FUNCSTATUS","PREOP_AMBUL","ASACLASS","HEMO",
+                    "PREOP_ASA","PREOP_P2Y","PREOP_STATIN","PREOP_BETABLOCKER","PREOP_ACE",
+                    "PREOP_DUPLEX","PREOP_MRA","PREOP_CTA",
+                    "POS_COVID_STAT","SIDE","C_PREOP_ANTICOAG",
+                    "indication",
+                    "R_INDICATIONR","R_INDICATIONL",
+                    "INDICATION_OCCLUSIVE_R","INDICATION_OCCLUSIVE_L","INDICATION_ANEURYSM_R",
+                    "INDICATION_ANEURYSM_L","ACUTE_ISCHEMIA_R","ACUTE_ISCHEMIA_L",
+                    "TISSUE_LOSS_SEV_R","TISSUE_LOSS_SEV_L", "INFECTION_R","INFECTION_L",
+                    "PINBYPASSR","PINBYPASSL","PINPTASTENTR","PINPTASTENTL",
+                    "PLEGBYPASSR","PLEGBYPASSL", "PLEGPTASTENTR","PLEGPTASTENTL",
+                    "R_PMAJAMPR","R_PMAJAMPL","R_PMINAMPR","R_PMINAMPL",
+                    "AMPUTATION_HX_R","AMPUTATION_HX_L","PREOP_ABIR","PREOP_ABIL",
+                    "PREOP_TOEPRESSURE_R","PREOP_NOTOE_R","PREOP_TOEPRESSURE_L","PREOP_NOTOE_L",
+                    "PREOP_TCPO2_R","PREOP_NOTCPO2_R","PREOP_TCPO2_L","PREOP_NOTCPO2_L",
+                    "R_PREOP_TBIR","ARTERIO","VMAP","R_PREOP_TBIL",
+                    "GLASS_REGION_FEMOROPOPLITEAL","GLASS_REGION_INFRAPOPLITEAL",
+                    "GLASS_REGION_INFRAMALEO_PEDAL","URGENCY",
+                    "R_ANESTHESIA","ANESTHESIA_LOCAL","ANESTHESIA_CONSCIOUS_SEDATION",
+                    "ANESTHESIA_REGIONAL","ANESTHESIA_GENERAL","SKINPREP","CHLOHEXIDINE_SHOWER",
+                    "proc", "fem_exposure",
+                    "GRAFTORIG","GRAFTRECIP","GRFTVTYPE","VEINSEG","PROSTHETIC",
+                    "R_GRAFTVEINTYPE","R_VEINSEGS","R_PROSTHETIC",
+                    "TOTALPROCTIME","GROIN_INCISION","CLOSURE",
+                    "DRESSING_1","DRESSING_2","DRESSING_3","DRESSING_4",
+                    "NEGATIVE_PRESSURE_DEVICE","R_VEIN_HARVEST_INCISION",
+                    "R_VEIN_GRAFT_LOCATION","VEIN_HARVEST_INCISION","VEIN_GRAFT_LOCATION",
+                    "R_VEINCUFF","SEQGRAFT","R_CCPVI","CC_IPS_PVI",
+                    "R_CCENDAR","CC_IPS_ENDAR","CCBYPASS",
+                    "SMOKING_CESS_RX_0","SMOKING_CESS_RX_1",
+                    "SMOKING_CESS_RX_2","SMOKING_CESS_RX_3",
+                    "R_ANTIBIOTICGEN", "R_ANTIBIOTICSTART","R_ANTIBIOTICEND",
+                    "ABX","ABX_START","ABX_STOP",
+                    "PREOP_NOABI_R","PREOP_NOABI_L",
+                    "TASC_GRADE_AORTO_ILIAC_R","TASC_GRADE_AORTO_ILIAC_L",
+                    "TASC_GRADE_FEM_POPLITEAL_R","TASC_GRADE_FEM_POPLITEAL_L",
+                    "TASC_GRADE_INFRAPOPLITEAL_R","TASC_GRADE_INFRAPOPLITEAL_L",
+                    "INCISION_SIDE","GROIN_INCISION_R","GROIN_INCISION_L",
+                    "CLOSURE_R","CLOSURE_L",
+                    "DRESSING_R_1","DRESSING_R_2","DRESSING_R_3","DRESSING_R_4",
+                    "DRESSING_L_1","DRESSING_L_2","DRESSING_L_3","DRESSING_L_4",
+                    "NEGATIVE_PRESSURE_DEVICE_R","NEGATIVE_PRESSURE_DEVICE_L",
+                    "GRFT_ORIGIN_ARTERY","SURGERYSIDE","GRFT_ORIGIN_DIA",
+                    "GRFT_RECP1_ARTERY","GRFT_RECP1_SIDE","GRFT_RECP1_GRFT_DIA",
+                    "GRFT_RECP1_GRFT_TYPE","GRFT_RECP1_ENDART",
+                    "GRFT_RECP2_ARTERY","GRFT_RECP2_SIDE","GRFT_RECP2_GRFT_DIA",
+                    "GRFT_RECP2_GRFT_TYPE","GRFT_RECP2_ENDART",
+                    "CCBYPASS_R","CCBYPASS_L","CCPVI_R","CCPVI_L","proc_ler","proc_ai")
+
+vqi_pad_grninf_preop_proc <- vqi_pad_grninf_clean[, grninf_preop_v, drop = FALSE]
+
+rm(list = c("vqi_pad_grninf_clean", "grninf_preop_v"))
+
+```
+
+# Variable Definitions
+
+We define our outcome as a binary variable inclusive of superficial, deep and organ space surgical site infection, necrosis, dehiscence, or lymph leak that required treatment with antibiotics, reoperation or readmission during the index admission or at any point during follow up.
+
+```{r outcome, echo=FALSE, warning=FALSE, message=FALSE}
+
+# We will define SSI as reported anytime during following.  Some LTF dates are >1 year and report an SSI, however unclear the timing of the actual SSI.
+
+# Import and clean data from LTF data sets
+
+#infra_ltf <- read_csv("P:/Pro00113988 - PAD Risk Models/DataRepo/VQI/INFRA_International_20231201/INFRA_International_LTF_20231201.csv")
+source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem_inf_vqi_clean_infra_ltf.R")
+infra_ltf_grninf <- infra_ltf %>% select(allVars_infra_ltf)
+
+#supra_ltf <- read_csv("P:/Pro00113988 - PAD Risk Models/DataRepo/VQI/SUPRA_International_20231201/SUPRA_International_LTF_20231201.csv")
+source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem_inf_vqi_clean_supra_ltf.R")
+supra_ltf_grninf <- supra_ltf %>% select(allVars_supra_ltf)
+
+pad_ltf_grninf <- bind_rows(infra_ltf_grninf,supra_ltf_grninf)
+
+rm(list = c("infra_ltf", "supra_ltf", "infra_ltf_grninf", "supra_ltf_grninf"))
+
+# Create Groin SSI variable
+
+pad_ltf_grninf$grninf_ltf <- ifelse(pad_ltf_grninf$D30_SSI == "Superficial" |
+                                        pad_ltf_grninf$D30_SSI == "Deep" |
+                                        pad_ltf_grninf$D30_SSI == "Organ Space" |
+                                        pad_ltf_grninf$R_D30_SSI == "Superficial" |
+                                        pad_ltf_grninf$R_D30_SSI == "Deep" |
+                                        pad_ltf_grninf$R_D30_SSI == "Organ Space" |
+                                        pad_ltf_grninf$LTF_SSI == "Superficial" |
+                                        pad_ltf_grninf$LTF_SSI == "Deep" |
+                                        pad_ltf_grninf$LTF_SSI == "Organ Space" |
+                                        pad_ltf_grninf$R_D30_GRAFT == TRUE |
+                                        pad_ltf_grninf$LTF_SSIGRAFT == TRUE |
+                                        pad_ltf_grninf$D30_ADMISSION_REASON == "Surgical Site Infection" |
+                                        pad_ltf_grninf$D30_ADMISSION_REASON == "Wound Complication" |
+                                        pad_ltf_grninf$D30_WOUNDCOMP_NECROSIS == TRUE |
+                                        pad_ltf_grninf$D30_WOUNDCOMP_DEHISCENCE == TRUE |
+                                        pad_ltf_grninf$D30_WOUNDCOMP_LYMPH_LEAK == TRUE,
+                                        TRUE, FALSE)
+pad_ltf_grninf$grninf_ltf <- replace(pad_ltf_grninf$grninf_ltf, is.na(pad_ltf_grninf$grninf_ltf), FALSE)
+pad_ltf_grninf$grninf_ltf <- as.logical(pad_ltf_grninf$grninf_ltf)
+
+pad_ltf_grninf$s_grninf_ltf <- ifelse(pad_ltf_grninf$D30_SSI == "Deep" |
+                                        pad_ltf_grninf$D30_SSI == "Organ Space" |
+                                        pad_ltf_grninf$R_D30_SSI == "Deep" |
+                                        pad_ltf_grninf$R_D30_SSI == "Organ Space" |
+                                        pad_ltf_grninf$LTF_SSI == "Deep" |
+                                        pad_ltf_grninf$LTF_SSI == "Organ Space" |
+                                        pad_ltf_grninf$R_D30_GRAFT == TRUE |
+                                        pad_ltf_grninf$LTF_SSIGRAFT == TRUE |
+                                        pad_ltf_grninf$D30_ADMISSION_REASON == "Surgical Site Infection" |
+                                        pad_ltf_grninf$D30_ADMISSION_REASON == "Wound Complication" |
+                                        pad_ltf_grninf$D30_WOUNDCOMP_NECROSIS == TRUE |
+                                        pad_ltf_grninf$D30_WOUNDCOMP_DEHISCENCE == TRUE |
+                                        pad_ltf_grninf$D30_WOUNDCOMP_LYMPH_LEAK == TRUE,
+                                        TRUE, FALSE)
+pad_ltf_grninf$s_grninf_ltf <- replace(pad_ltf_grninf$s_grninf_ltf, is.na(pad_ltf_grninf$s_grninf_ltf), FALSE)
+pad_ltf_grninf$s_grninf_ltf <- as.logical(pad_ltf_grninf$s_grninf_ltf)
+
+# Survival analysis for Groin SSI
+
+## Identifying date where SSI was first reported.
+pad_ltf_grninf_surv = pad_ltf_grninf %>%
+  select(c(PRIMPROCID, LTF_DAYS, grninf_ltf))
+
+pad_ltf_grninf_surv$grninf_surv[pad_ltf_grninf_surv$grninf_ltf == TRUE] <- 1
+pad_ltf_grninf_surv$grninf_surv[pad_ltf_grninf_surv$grninf_ltf == FALSE] <- 0
+
+pad_ltf_grninf_surv_trim = pad_ltf_grninf_surv %>% 
+  arrange(PRIMPROCID, LTF_DAYS) %>% 
+  group_by(PRIMPROCID) %>% 
+  mutate(
+    first_event = cumsum(grninf_surv) == 1,      # Mark TRUE if goes from 0 to 1
+    status_nochange = sum(grninf_surv) == 0,                       # Mark if no change from 0
+    status_nochange_keep = !duplicated(status_nochange, fromLast= TRUE) # Mark most recent "no change" episode
+  ) %>% 
+  filter(first_event | (status_nochange & status_nochange_keep)) %>%  # Filter out other episodes
+  select(-c(first_event, status_nochange, status_nochange_keep))      # Remove columns not needed
+
+## Identifying date where severe SSI was first reported.
+pad_ltf_s_grninf_surv = pad_ltf_grninf %>%
+  select(c(PRIMPROCID, LTF_DAYS, s_grninf_ltf))
+
+pad_ltf_s_grninf_surv$s_grninf_surv[pad_ltf_s_grninf_surv$s_grninf_ltf == TRUE] <- 1
+pad_ltf_s_grninf_surv$s_grninf_surv[pad_ltf_s_grninf_surv$s_grninf_ltf == FALSE] <- 0
+
+pad_ltf_s_grninf_surv_trim = pad_ltf_s_grninf_surv %>% 
+  arrange(PRIMPROCID, LTF_DAYS) %>% 
+  group_by(PRIMPROCID) %>% 
+  mutate(
+    first_event = cumsum(s_grninf_surv) == 1,      # Mark TRUE if goes from 0 to 1
+    status_nochange = sum(s_grninf_surv) == 0,                       # Mark if no change from 0
+    status_nochange_keep = !duplicated(status_nochange, fromLast= TRUE) # Mark most recent "no change" episode
+  ) %>% 
+  filter(first_event | (status_nochange & status_nochange_keep)) %>%  # Filter out other episodes
+  select(-c(first_event, status_nochange, status_nochange_keep))      # Remove columns not needed
+
+#Merge the LTF and PROC datasets
+
+vqi_pad_grninf_preop_grninf <- merge(vqi_pad_grninf_preop_proc, pad_ltf_grninf_surv_trim, by='PRIMPROCID')
+vqi_pad_grninf_preop <- merge(vqi_pad_grninf_preop_grninf, pad_ltf_s_grninf_surv_trim, by='PRIMPROCID')
+
+#Define the PROC SSI
+
+vqi_pad_grninf_preop$grninf_proc <- ifelse(vqi_pad_grninf_preop$POSTOP_SSI == "TRUE" |
+                                        vqi_pad_grninf_preop$GRAFTINF == "TRUE" |
+                                        vqi_pad_grninf_preop$RTORINF == "TRUE" |
+                                        vqi_pad_grninf_preop$WCOMP == "Superficial Separation / Infection" |
+                                        vqi_pad_grninf_preop$WCOMP == "Return to OR",
+                                        TRUE, FALSE)
+vqi_pad_grninf_preop$grninf_proc <- replace(vqi_pad_grninf_preop$grninf_proc, is.na(vqi_pad_grninf_preop$grninf_proc), FALSE)
+vqi_pad_grninf_preop$grninf_proc <- as.logical(vqi_pad_grninf_preop$grninf_proc)
+
+vqi_pad_grninf_preop$s_grninf_proc <- ifelse(vqi_pad_grninf_preop$GRAFTINF == "TRUE" |
+                                        vqi_pad_grninf_preop$RTORINF == "TRUE" |
+                                        vqi_pad_grninf_preop$WCOMP == "Return to OR",
+                                        TRUE, FALSE)
+vqi_pad_grninf_preop$s_grninf_proc <- replace(vqi_pad_grninf_preop$s_grninf_proc, is.na(vqi_pad_grninf_preop$s_grninf_proc), FALSE)
+vqi_pad_grninf_preop$s_grninf_proc <- as.logical(vqi_pad_grninf_preop$s_grninf_proc)
+
+
+# Create grninf variable that includes both inpatient and outpatient grn infections.
+vqi_pad_grninf_preop$grninf <- ifelse(vqi_pad_grninf_preop$grninf_proc == TRUE, TRUE, vqi_pad_grninf_preop$grninf_ltf)
+
+vqi_pad_grninf_preop$s_grninf <- ifelse(vqi_pad_grninf_preop$s_grninf_proc == TRUE, TRUE, vqi_pad_grninf_preop$s_grninf_ltf)
+
+# Assign the time variable to LOS if SSI occurs inpatient and set to LTF days if occurs as an outpatient.
+#vqi_pad_grninf_preop$time <- ifelse(vqi_pad_grninf_preop$grninf_proc == TRUE, vqi_pad_grninf_preop$POSTOP_LOS, vqi_pad_grninf_preop$LTF_DAYS)
+
+# Create Kaplan Meier Curve
+
+#fit <- survfit(Surv(time = vqi_pad_grninf_preop$time, event = vqi_pad_grninf_preop$grninf) ~ 1, data = vqi_pad_grninf_preop)
+
+#ggsurvplot(fit, data = vqi_pad_grninf_preop,
+#           title = "Groin SSI after Open LER",
+#           xlab = "Time",
+#           ylab = "Survival Probability")
+#summary(fit, times = c(0, 30, 90, 365, 730))
+
+rm(list = c("infra_ltf_grninf", "pad_ltf_grninf", "supra_ltf", "supra_ltf_grninf", "vqi_ltf_grninf",
+            "vqi_pad_grninf_preop_proc", "allVars_infra_ltf", "allVars_supra_ltf", "pad_ltf_grninf_surv",
+            "pad_ltf_grninf_surv_trim"))
+
+#vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("POSTOP_SSI", "GRAFTINF", "RTOR", "RTORINF", "WCOMP", #'POSTOP_LOS', 'LTF_DAYS', 'LTF_SSIGRAFT', 'D30_WOUNDCOMP_NECROSIS', 'D30_WOUNDCOMP_HEMATOMA', 'D30_WOUNDCOMP_SEROMA', 'D30_WOUNDCOMP_LYMPH_LEAK', #'D30_WOUNDCOMP_DEHISCENCE', 'D30_WOUNDCOMP_OTHER',            'D30_VASCCOMP_BLEEDING', 'R_D30_GRAFT', 'LTF_SSI','FWP_TIMEPOINT', #'D30_ADMISSION_REASON', 'D30_SSI', 'R_D30_SSI', 'grninf_ltf', 'grninf_surv','grninf_proc'))]
+
+#Select for centers who report more than 10 events
+
+#center_events <- table(vqi_pad_grninf_preop$CENTERID, vqi_pad_grninf_preop$grninf)
+#center_events <- as.data.frame(center_events)
+
+#center_grninf <- center_events %>%
+#  filter(Var2 == TRUE & Freq >= 10)
+
+#centers_grt10 <- center_grninf$Var1
+
+#vqi_pad_grninf_preop <- vqi_pad_grninf_preop %>%
+#  filter(CENTERID %in% centers_grt10)
+
+```
+
+Table 1: VQI cohort patient demographics.
+```{r Table 1, echo=FALSE, warning=FALSE, message=FALSE}
+
+vqi_pad_grninf_preop <- droplevels(vqi_pad_grninf_preop)
+
+label(vqi_pad_grninf_preop$GENDER) <- "Sex"
+label(vqi_pad_grninf_preop$RACE) <- "Race"
+label(vqi_pad_grninf_preop$SURGYEAR) <- "Operative Year"
+label(vqi_pad_grninf_preop$indication) <- "Indication"
+label(vqi_pad_grninf_preop$proc) <- "Procedure"
+
+t1_exp <- c("AGE", "GENDER", "RACE", "indication", "proc")
+dep_1 <- "grninf"
+dep_2 <- "s_grninf"
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_1, t1_exp,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t1_1
+
+t1_1 <- t1_1 %>%
+  select(1, 2, 4, 5) %>%
+  rename("Any Groin SSI" = "TRUE")
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_2, t1_exp,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t1_2
+
+t1_2 <- t1_2 %>%
+  select(4) %>%
+  rename("Severe Groin SSI" = "TRUE")
+
+t1 <- t1_1 %>%
+  bind_cols(t1_2) %>%
+  select(1, 2, 3, 5, 4)
+
+knitr::kable(t1, align = c("l", "l", "r", "r", "r"))
+```
+# Variable Mapping
+
+We included studies identified through two previously published systematic reviews (Gwilym et al and Kirkham et al).  We mapped each feature to the variables collected in the VQI registry.  We attempted direct mapping when the variable definitions aligned sufficiently.  In the case that no direct mapping was possible, we attempted to create a proxy feature that aligned with the conceptual definition of the variable included in the study.  When no variable was available that aligned with the published feature we excluded this variable from the model, imputing for the reference.
+
+## Bennett et al Model
+
+The Bennett et al Model was developed and internally validated for a single institution cohort.  Four variables--female gender, BMI, ESRD, and urgency--were able to be mapped directly.  Two variables required proxy definitions.  Reoperative groin was defined was having a previous open ipsilateral revascularization.  Malnutrition was defined as a BMI <18.  No published features were excluded.
+
+Only Odds ratios were provided in this publication, therefore only discrimination was calculated for this model in our data set.
+
+```{r Bennett variables, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Create female variable
+vqi_pad_grninf_preop$female <- ifelse(vqi_pad_grninf_preop$GENDER == "Female", TRUE, FALSE)
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("GENDER"))]
+label(vqi_pad_grninf_preop$female) <- "Female Gender"
+
+## Create the variable for BMI
+vqi_pad_grninf_preop$BMI <- vqi_pad_grninf_preop$WTKG/((vqi_pad_grninf_preop$HTCM/100)^2)
+
+vqi_pad_grninf_preop$underweight <- ifelse(vqi_pad_grninf_preop$BMI < "18.5", TRUE, FALSE)
+vqi_pad_grninf_preop$underweight <- ifelse(is.na(vqi_pad_grninf_preop$underweight), 
+                                         FALSE, vqi_pad_grninf_preop$underweight)
+label(vqi_pad_grninf_preop$underweight) <- "Underweight (BMI <18)"
+
+vqi_pad_grninf_preop$overweight <- ifelse(vqi_pad_grninf_preop$BMI > "25" & vqi_pad_grninf_preop$BMI < "30", TRUE, FALSE)
+vqi_pad_grninf_preop$overweight <- ifelse(is.na(vqi_pad_grninf_preop$overweight), 
+                                           FALSE, vqi_pad_grninf_preop$overweight)
+label(vqi_pad_grninf_preop$overweight) <- "Overweight (BMI 25-30)"
+
+vqi_pad_grninf_preop$obese <- ifelse(vqi_pad_grninf_preop$BMI > "30", TRUE, FALSE)
+vqi_pad_grninf_preop$obese <- ifelse(is.na(vqi_pad_grninf_preop$obese), 
+                                          FALSE, vqi_pad_grninf_preop$obese)
+label(vqi_pad_grninf_preop$obese) <- "Obese (BMI >30)"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("WTKG", "HTCM"))]
+
+## Bennett et al defined reoperative groin as "presence of previous groin incision on ipsilateral side." 
+## We will use the variable for preivous bypass. - Bennett
+
+vqi_pad_grninf_preop$reop_groin <- 
+  ifelse(((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right")  & vqi_pad_grninf_preop$PINBYPASSR == TRUE) |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$PINBYPASSL == TRUE) |
+         ((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right")  & vqi_pad_grninf_preop$PLEGBYPASSR == TRUE) |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$PLEGBYPASSL == TRUE),
+        TRUE, FALSE)
+vqi_pad_grninf_preop$reop_groin <- ifelse(is.na(vqi_pad_grninf_preop$reop_groin), 
+                                        FALSE, vqi_pad_grninf_preop$reop_groin)
+label(vqi_pad_grninf_preop$reop_groin) <- "Reoperative Groin"
+
+## Bennett et al defines as a diagnosis of End Stage Renal Disease.  We will use DIALYSIS variable.  We will lump
+## transplants in with dialysis patients.  Only small number with functioning transplant so not reasonable to 
+## treat as their own group
+vqi_pad_grninf_preop$esrd <- ifelse(vqi_pad_grninf_preop$DIALYSIS == "On dialysis" |
+                                      vqi_pad_grninf_preop$DIALYSIS == "Functioning transplant", TRUE, FALSE)
+label(vqi_pad_grninf_preop$esrd) <- "ESRD (On dialysis or functioning transplant)"
+
+
+## Bennett et al defines malnutrition according to ICD-9 codes: 262, 263, 263.1, 263.9
+## Create a variable for malnutrition based what components are available from PONS (Wischmeyer et al 2018), the components of which are:
+## BMI < 18.5; Weightloss >10% in last 6mo; Reduced oral intake by 50% in past week; Preop serum albumin <3.0 g/dL
+## VQI only includes BMI, so we will use that alone for malnutrtion.
+
+vqi_pad_grninf_preop$malnut <- ifelse(vqi_pad_grninf_preop$BMI < "18.5", TRUE, FALSE)
+label(vqi_pad_grninf_preop$malnut) <- "Malnutrition"
+
+#No need to create a new variable for urgent. Will use URGENCY variable.
+vqi_pad_grninf_preop$urgnt <- ifelse(vqi_pad_grninf_preop$URGENCY == "Urgent" |
+                                       vqi_pad_grninf_preop$URGENCY == "Emergent", TRUE, FALSE)
+label(vqi_pad_grninf_preop$urgnt) <- "Urgent or Emergent Procedure"
+
+b_exp <- c("reop_groin", "female", "BMI", "esrd", "malnut", "urgnt")
+dep_1 <- "grninf"
+dep_2 <- "s_grninf"
+exp <- b_exp
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_1, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=") -> t2_1
+
+t2_1 <- t2_1 %>%
+  select(1,2,4,5) %>%
+  rename("Any Groin SSI" = "TRUE")
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_2, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t2_2
+
+selected_columns <- t2_2 %>%
+  select(4,6,5) %>%
+  rename("Severe Groin SSI" = "TRUE")
+
+t2 <- t2_1 %>%
+  bind_cols(selected_columns)
+
+knitr::kable(t2, align = c("l", "l", "c", "c", "c", "c", "r"))
+
+```
+
+## Gwilym et al Model
+
+The Gwilym et al model was developed and internally validated on an international mulicentre prospective observational cohort.  This publication compared the performance of their model to previously develep models identified through systematic review.  Two models were provided in this publication for any SSI and for deep/organ space SSI.  We validated both models on our outcome definition.  Six variables--female, BMI class, diabetese, preoperative skin prep, bypass conduit, and operative time--were mapped directly. A proxy feature for ischemic heart disease was used, defined as any documented history or CAD, prior CABG or prior PCI.  The variable for xenograft patch material was excluded as the patch material used for endarterectomy is not clearly documented in this data set.
+
+This publication provided the full regression model with intercept and beta coefficients, which was used for both discrimination and calibration.
+
+```{r Gwilym variables, echo=FALSE, warning=FALSE, message=FALSE}
+
+# The variables for female gender and BMI were defined previously.
+
+
+## Create variable ischemic heart disease using multiple variables related to ischemic heart
+## disease.  CAD, PRIOR_CABG, PRIOR_PCI are all related to ischemic heart disease.  We will not
+## include HTN, PRIOR_CHF, and PREOP_DYSRHYTHMIA because these are heart diseases not necessarily
+## related to underlying ischemic disease.
+
+vqi_pad_grninf_preop$CAD <- fct_explicit_na(vqi_pad_grninf_preop$CAD, na_level = "None")
+vqi_pad_grninf_preop$PRIOR_CABG <- fct_explicit_na(vqi_pad_grninf_preop$PRIOR_CABG, na_level = "None")
+vqi_pad_grninf_preop$PRIOR_PCI <- fct_explicit_na(vqi_pad_grninf_preop$PRIOR_PCI, na_level = "None")
+
+vqi_pad_grninf_preop$heart_dz <- ifelse(vqi_pad_grninf_preop$CAD == "Hx MI but no sx" | 
+                                          vqi_pad_grninf_preop$CAD == "Stable angina" |
+                                          vqi_pad_grninf_preop$CAD == "Unstable angina or MI < 6 mos (retired since 09/12/2012)" |
+                                          vqi_pad_grninf_preop$CAD == "MI < 6 mos" |
+                                          vqi_pad_grninf_preop$CAD == "Unstable angina" |
+                                          vqi_pad_grninf_preop$CAD == "CAD, asymptomatic" |
+                                          vqi_pad_grninf_preop$PRIOR_CABG == "<5yr ago" |
+                                          vqi_pad_grninf_preop$PRIOR_CABG == ">= 5yrs ago" |
+                                          vqi_pad_grninf_preop$PRIOR_PCI == "<5yr ago" |
+                                          vqi_pad_grninf_preop$PRIOR_PCI == ">= 5yrs ago" |
+                                          vqi_pad_grninf_preop$R_PRIOR_CABGPTCA == "<5yr ago" |
+                                          vqi_pad_grninf_preop$R_PRIOR_CABGPTCA == ">= 5yrs ago", TRUE, FALSE)
+vqi_pad_grninf_preop$heart_dz <- replace(vqi_pad_grninf_preop$heart_dz, is.na(vqi_pad_grninf_preop$heart_dz), FALSE)
+label(vqi_pad_grninf_preop$heart_dz) <- "Ischemic Heart Disease"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("CAD", "PRIOR_CABG", "PRIOR_PCI", "R_PRIOR_CABGPTCA"))]
+
+## Create variable Skin_preparation.  VQI includes this as a variable SKINPREP.  "Alcohol" was not mentioned
+## in the Gwilym article so this was not mapped
+
+vqi_pad_grninf_preop$SKINPREP <- fct_explicit_na(vqi_pad_grninf_preop$SKINPREP, na_level = "Unknown")
+
+vqi_pad_grninf_preop$prep_al_chlo <- ifelse(vqi_pad_grninf_preop$SKINPREP == "Chlor + alcohol", TRUE, FALSE)
+label(vqi_pad_grninf_preop$prep_al_chlo) <- "Prep with Alcoholic Chlorhexidine"
+vqi_pad_grninf_preop$prep_aq_chlo <- ifelse(vqi_pad_grninf_preop$SKINPREP == "Chlorhexidine", TRUE, FALSE)
+label(vqi_pad_grninf_preop$prep_aq_chlo) <- "Prep with Aqueous Chlorhexidine"
+vqi_pad_grninf_preop$prep_al_beta <- ifelse(vqi_pad_grninf_preop$SKINPREP == "Iodine + alcohol", TRUE, FALSE)
+label(vqi_pad_grninf_preop$prep_al_beta) <- "Prep with Iodine and Alcohol"
+vqi_pad_grninf_preop$prep_aq_beta <- ifelse(vqi_pad_grninf_preop$SKINPREP == "Iodine", TRUE, FALSE)
+label(vqi_pad_grninf_preop$prep_aq_beta) <- "Prep with Aqeuous Iodine"
+vqi_pad_grninf_preop$prep_two_thr <- ifelse(vqi_pad_grninf_preop$SKINPREP == "Chlor + iodine" |
+                                              vqi_pad_grninf_preop$SKINPREP == "All 3", TRUE, FALSE)
+label(vqi_pad_grninf_preop$prep_two_thr) <- "Prep with Two or Three Solutions"
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("SKINPREP"))]
+
+## Create variable for vein bypass material
+
+vqi_pad_grninf_preop$vein <- ifelse(vqi_pad_grninf_preop$GRFTVTYPE == "Reversed GSV" |
+                                      vqi_pad_grninf_preop$GRFTVTYPE == "In Situ GSV" |
+                                      vqi_pad_grninf_preop$GRFTVTYPE == "Non-reversed Transposed GSV" |
+                                      vqi_pad_grninf_preop$GRFTVTYPE == "Lesser Saph" |
+                                      vqi_pad_grninf_preop$GRFTVTYPE == "Cephalic" |
+                                      vqi_pad_grninf_preop$GRFTVTYPE == "Basilic" |
+                                      vqi_pad_grninf_preop$R_GRAFTVEINTYPE == "Reversed GSV" |
+                                      vqi_pad_grninf_preop$R_GRAFTVEINTYPE == "In Situ GSV" |
+                                      vqi_pad_grninf_preop$R_GRAFTVEINTYPE == "Non-reversed Transposed GSV" |
+                                      vqi_pad_grninf_preop$R_GRAFTVEINTYPE == "Lesser Saph" |
+                                      vqi_pad_grninf_preop$R_GRAFTVEINTYPE == "Cephalic" |
+                                      vqi_pad_grninf_preop$R_GRAFTVEINTYPE == "Basilic" |
+                                      vqi_pad_grninf_preop$R_GRAFTVEINTYPE == "Composite Vein" |
+                                      vqi_pad_grninf_preop$GRFT_RECP1_GRFT_TYPE == "Saphenous Vein" |
+                                      vqi_pad_grninf_preop$GRFT_RECP1_GRFT_TYPE == "Deep Vein" |
+                                      vqi_pad_grninf_preop$GRFT_RECP1_GRFT_TYPE == "Spliced Vein" |
+                                      vqi_pad_grninf_preop$GRFT_RECP2_GRFT_TYPE == "Saphenous Vein" |
+                                      vqi_pad_grninf_preop$GRFT_RECP2_GRFT_TYPE == "Deep Vein" |
+                                      vqi_pad_grninf_preop$GRFT_RECP2_GRFT_TYPE == "Spliced Vein", TRUE, FALSE)
+vqi_pad_grninf_preop$vein <- replace(vqi_pad_grninf_preop$vein, is.na(vqi_pad_grninf_preop$vein), FALSE)
+label(vqi_pad_grninf_preop$vein) <- "Vein Conduit"
+
+
+## Create variable for xenograft material - no exact variable for xenograft, so we will not be able to use.
+
+## Create variable for prosthetic material - Gwilym
+
+vqi_pad_grninf_preop$prsth <- ifelse(vqi_pad_grninf_preop$PROSTHETIC == "Dacron" |
+                                       vqi_pad_grninf_preop$PROSTHETIC == "PTFE" |
+                                       vqi_pad_grninf_preop$PROSTHETIC == "Other" |
+                                       vqi_pad_grninf_preop$R_PROSTHETIC == "Dacron" |
+                                       vqi_pad_grninf_preop$R_PROSTHETIC == "PTFE" |
+                                       vqi_pad_grninf_preop$R_PROSTHETIC == "Composite w/ vein" |
+                                       vqi_pad_grninf_preop$GRFT_RECP1_GRFT_TYPE == "Dacron" |
+                                       vqi_pad_grninf_preop$GRFT_RECP1_GRFT_TYPE == "PTFE" |
+                                       vqi_pad_grninf_preop$GRFT_RECP1_GRFT_TYPE == "Composite Prosthetic-vein" |
+                                       vqi_pad_grninf_preop$GRFT_RECP2_GRFT_TYPE == "Dacron" |
+                                       vqi_pad_grninf_preop$GRFT_RECP2_GRFT_TYPE == "PTFE" |
+                                       vqi_pad_grninf_preop$GRFT_RECP2_GRFT_TYPE == "Composite Prosthetic-vein",
+                                     TRUE, FALSE)
+vqi_pad_grninf_preop$prsth <- replace(vqi_pad_grninf_preop$prsth, is.na(vqi_pad_grninf_preop$prsth), FALSE)
+label(vqi_pad_grninf_preop$prsth) <- "Prosthetic Conduit"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("GRFTVTYPE", "R_GRAFTVEINTYPE", "PROSTHETIC", "R_PROSTHETIC", "GRFT_RECP1_GRFT_TYPE", "GRFT_RECP2_GRFT_TYPE"))]
+
+## Create variable for Procedure time in Hours and remove cases less than 0.5hrs and greater than 12 hours.
+
+vqi_pad_grninf_preop$optime_hrs <- ((vqi_pad_grninf_preop$TOTALPROCTIME)/60)
+
+vqi_pad_grninf_preop$optime_hrs[vqi_pad_grninf_preop$optime_hrs < 0.5] <- NA
+vqi_pad_grninf_preop$optime_hrs[vqi_pad_grninf_preop$optime_hrs > 12] <- NA
+
+
+g_exp <- c("female", "underweight", "overweight", "obese", "heart_dz", "prep_aq_chlo", "prep_al_beta", "prep_aq_beta", "prep_two_thr", "vein", "prsth","optime_hrs")
+dep_1 <- "grninf"
+dep_2 <- "s_grninf"
+exp <- g_exp
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_1, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=") -> t2_1
+
+t2_1 <- t2_1 %>%
+  select(1,2,4,5) %>%
+  rename("Any Groin SSI" = "TRUE")
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_2, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t2_2
+
+selected_columns <- t2_2 %>%
+  select(4,6,5) %>%
+  rename("Severe Groin SSI" = "TRUE")
+
+t2 <- t2_1 %>%
+  bind_cols(selected_columns)
+
+knitr::kable(t2, align = c("l", "l", "c", "c", "c", "c", "r"))
+```
+
+## Gwilym et al Model - Deep Variables
+
+```{r Gwilym Deep Variables, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Model includes a variable for any diabetes
+vqi_pad_grninf_preop$dm_any <- ifelse(vqi_pad_grninf_preop$DIABETES == "Insulin" |
+                                        vqi_pad_grninf_preop$DIABETES == "Non-insulin meds" |
+                                           vqi_pad_grninf_preop$DIABETES == "Diet",
+                                      TRUE, FALSE)
+vqi_pad_grninf_preop$dm_any <- ifelse(is.na(vqi_pad_grninf_preop$dm_any), 
+                                        FALSE, vqi_pad_grninf_preop$dm_any)
+label(vqi_pad_grninf_preop$dm_any) <- "Diabetese Mellitus"
+
+gd_exp <- c("female", "dm_any", "prep_aq_chlo", "prep_al_beta", "prep_aq_beta", "prep_two_thr", "vein", "prsth")
+dep_1 <- "grninf"
+dep_2 <- "s_grninf"
+exp <- gd_exp
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_1, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=") -> t2_1
+
+t2_1 <- t2_1 %>%
+  select(1,2,4,5) %>%
+  rename("Any Groin SSI" = "TRUE")
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_2, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t2_2
+
+selected_columns <- t2_2 %>%
+  select(4,6,5) %>%
+  rename("Severe Groin SSI" = "TRUE")
+
+t2 <- t2_1 %>%
+  bind_cols(selected_columns)
+
+knitr::kable(t2, align = c("l", "l", "c", "c", "c", "c", "r"))
+
+```
+
+## Leekha et al Model
+
+The Leekha model was developed and internally validated through a nested case control study of a single institution.  Three variables--CLTI, COPD, and previous ipsilateral revascularization--were mapped directly.  The variable for previous SSI was not included, as this is not clearly documented in the VQI registry.
+
+This publication reported beta-coefficients and odds ratios, but did not provide an intercept term, therefore the regression model was only used for discrimination.  The publication did provide a nomogram, which was used for calibration.
+
+```{r Leekha variables, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Define variable for CLTI. - Leekha
+
+vqi_pad_grninf_preop$clti <-  
+  ifelse(((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right") & vqi_pad_grninf_preop$R_INDICATIONR == "Rest Pain") |
+         ((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right") & vqi_pad_grninf_preop$R_INDICATIONR == "Tissue Loss") |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$R_INDICATIONL == "Rest Pain") |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$R_INDICATIONL == "Tissue Loss") |
+         ((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right") & vqi_pad_grninf_preop$INDICATION_OCCLUSIVE_R == "Rest Pain") |
+         ((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right") & vqi_pad_grninf_preop$INDICATION_OCCLUSIVE_R == "Ulcer/necrosis") |
+         ((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right") & vqi_pad_grninf_preop$INDICATION_OCCLUSIVE_R == "Non-healing amputation") |
+         ((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right") & vqi_pad_grninf_preop$INDICATION_OCCLUSIVE_R == "Both ulcer and non-healing amp") |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$INDICATION_OCCLUSIVE_L == "Rest Pain") |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$INDICATION_OCCLUSIVE_L == "Ulcer/necrosis") |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$INDICATION_OCCLUSIVE_L == "Non-healing amputation") |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$INDICATION_OCCLUSIVE_L == "Both ulcer and non-healing amp"),
+        TRUE, FALSE)
+vqi_pad_grninf_preop$clti <- replace(vqi_pad_grninf_preop$clti, is.na(vqi_pad_grninf_preop$clti), FALSE)
+label(vqi_pad_grninf_preop$clti) <- "Chronic Limb Threatening Ischemia"
+
+## Utilize hxCOPD variable for COPD. No need to create a new variable.
+
+vqi_pad_grninf_preop$hxcopd <- ifelse(vqi_pad_grninf_preop$COPD == "Not treated" |
+                                      vqi_pad_grninf_preop$COPD == "On meds" |
+                                      vqi_pad_grninf_preop$COPD == "On home oxygen", TRUE, FALSE)
+label(vqi_pad_grninf_preop$hxcopd) <- "History of COPD"
+
+vqi_pad_grninf_preop$hxcopd_tx <- ifelse(vqi_pad_grninf_preop$COPD == "On meds" |
+                                      vqi_pad_grninf_preop$COPD == "On home oxygen", TRUE, FALSE)
+label(vqi_pad_grninf_preop$hxcopd_tx) <- "History of COPD on treatment"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("COPD"))]
+
+## Leekha et al defines prior revascularization as either a prior surgical or percutaneous revascularization procedure. We will not use R_PTASTENT or R_PRIOR_BYPASS.  Because we want to be sure the intervention was ipsilateral to the side of current intervention. R_PRIOR_BYPASS is a retired variable representing a history of any non-coronary bypass.  This likely has significant overlap with this feature and so we will just remove this variable.
+
+vqi_pad_grninf_preop$prrevasc_ips <- 
+  ifelse(((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right") & vqi_pad_grninf_preop$PINBYPASSR == TRUE) |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$PINBYPASSL == TRUE) |
+         ((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right") & vqi_pad_grninf_preop$PINPTASTENTR == TRUE) |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$PINPTASTENTL == TRUE) |
+         ((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right") & vqi_pad_grninf_preop$PLEGBYPASSR == TRUE) |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$PLEGBYPASSL == TRUE) |
+         ((vqi_pad_grninf_preop$SIDE == "Right" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Right" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Right") & vqi_pad_grninf_preop$PLEGPTASTENTR == TRUE) |
+         ((vqi_pad_grninf_preop$SIDE == "Left" | 
+           vqi_pad_grninf_preop$GRFT_RECP1_SIDE == "Left" |
+           vqi_pad_grninf_preop$GRFT_RECP2_SIDE == "Left") & vqi_pad_grninf_preop$PLEGPTASTENTL == TRUE)
+                                        , TRUE, FALSE)
+vqi_pad_grninf_preop$prrevasc_ips <- ifelse(is.na(vqi_pad_grninf_preop$prrevasc_ips), 
+                                        FALSE, vqi_pad_grninf_preop$prrevasc_ips)
+label(vqi_pad_grninf_preop$prrevasc_ips) <- "Prior Ipsilateral Revascularization"
+
+l_exp <- c("clti", "hxcopd", "prrevasc_ips")
+dep_1 <- "grninf"
+dep_2 <- "s_grninf"
+exp <- l_exp
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_1, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=") -> t2_1
+
+t2_1 <- t2_1 %>%
+  select(1,2,4,5) %>%
+  rename("Any Groin SSI" = "TRUE")
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_2, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t2_2
+
+selected_columns <- t2_2 %>%
+  select(4,6,5) %>%
+  rename("Severe Groin SSI" = "TRUE")
+
+t2 <- t2_1 %>%
+  bind_cols(selected_columns)
+
+knitr::kable(t2, align = c("l", "l", "c", "c", "c", "c", "r"))
+
+```
+
+## Wiseman et al Model
+
+The Wiseman model was developed and internally validated on the NSQIP data from 2005-2012.  The majority of the variables--age, sex, race, BMI Class, diabetes, smoking status, hypertension, CLTI, functional status, ESRD, COPD, emergency status, operative time, procedure class, groin anastomosis, and ASA class--were able to be mapped directly.  We used the same proxy definition for coronary artery disease and ischemic heart disease as in the Gwilym at al model.  We defined dependent functional status as either bed bound functional status, or bedridden or wheelchair ambulation status.  We defined partially dependent functional status as either assisted care functional status or ambulates with assistance. We definied history of neurologic disease as any preivous TIA, stroke, CEA or CAS.  Three postoperative variables--sepsis complication, renal complication and LOS >14d--were not included in the model, because these would not be known in the preoperative setting.
+
+This publication provided only odds ratios for the regression model, and these were used to determine discrimination.  The publication did provide a nomogram, which was used for calibration.
+
+```{r Wiseman Variables, echo=FALSE, warning=FALSE, message=FALSE}
+
+## obese, overweight, female, clti, hxcopd, and heart_dz variables were previously created.
+
+#Create variable for age greater than 65. - Wiseman
+vqi_pad_grninf_preop$age1845 <- ifelse(vqi_pad_grninf_preop$AGE > "18" & vqi_pad_grninf_preop$AGE < "45", TRUE, FALSE)
+vqi_pad_grninf_preop$age1845 <- ifelse(is.na(vqi_pad_grninf_preop$age1845), 
+                                          FALSE, vqi_pad_grninf_preop$age1845)
+label(vqi_pad_grninf_preop$age1845) <- "Age 18-45"
+
+vqi_pad_grninf_preop$age4565 <- ifelse(vqi_pad_grninf_preop$AGE > "45" & vqi_pad_grninf_preop$AGE < "65", TRUE, FALSE)
+vqi_pad_grninf_preop$age4565 <- ifelse(is.na(vqi_pad_grninf_preop$age4565), 
+                                       FALSE, vqi_pad_grninf_preop$age4565)
+label(vqi_pad_grninf_preop$age4565) <- "Age 45-65"
+
+vqi_pad_grninf_preop$age65 <- ifelse(vqi_pad_grninf_preop$AGE > "65", TRUE, FALSE)
+label(vqi_pad_grninf_preop$age65) <- "Age >65"
+
+#Create Black and Other race variable from on race variable in NSQIP. - Wiseman
+vqi_pad_grninf_preop$blkrace <- ifelse(vqi_pad_grninf_preop$RACE == "Black or African American", TRUE, FALSE)
+label(vqi_pad_grninf_preop$blkrace) <- "Black or African American Race"
+
+vqi_pad_grninf_preop$othrace <- ifelse(vqi_pad_grninf_preop$RACE == "American Indian or Alaskan Native" |
+                                         vqi_pad_grninf_preop$RACE == "Asian" |
+                                         vqi_pad_grninf_preop$RACE == "Native Hawaiian or other Pacific Islander" |
+                                         vqi_pad_grninf_preop$RACE == "More than 1 race" |
+                                         vqi_pad_grninf_preop$RACE == "Unknown / Other", TRUE, FALSE)
+label(vqi_pad_grninf_preop$othrace) <- "Other Race"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("RACE"))]
+
+## Create insulin dependent diabetes variable. 
+## The false value represent the patients with diabetes who are not insulin dependent. - Wiseman
+vqi_pad_grninf_preop$dm_ins <- ifelse(vqi_pad_grninf_preop$DIABETES == "Insulin", TRUE, FALSE)
+vqi_pad_grninf_preop$dm_ins <- ifelse(is.na(vqi_pad_grninf_preop$dm_ins), 
+                                        FALSE, vqi_pad_grninf_preop$dm_ins)
+label(vqi_pad_grninf_preop$dm_ins) <- "Diabetes Mellitus (Insulin Dependent)"
+
+vqi_pad_grninf_preop$dm_nonins <- ifelse(vqi_pad_grninf_preop$DIABETES == "Non-insulin meds" |
+                                           vqi_pad_grninf_preop$DIABETES == "Diet", TRUE, FALSE)
+vqi_pad_grninf_preop$dm_nonins <- ifelse(is.na(vqi_pad_grninf_preop$dm_nonins), 
+                                      FALSE, vqi_pad_grninf_preop$dm_nonins)
+label(vqi_pad_grninf_preop$dm_nonins) <- "Diabetes Mellitus (Non-Insulin Dependent)"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("DIABETES"))]
+
+#create smoking variable
+vqi_pad_grninf_preop$smoke <- ifelse(vqi_pad_grninf_preop$PREOP_SMOKING == "Current", TRUE, FALSE)
+label(vqi_pad_grninf_preop$smoke) <- "Current Smoker"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("SMOKING"))]
+
+#create htn variable
+vqi_pad_grninf_preop$hypermed <- ifelse(vqi_pad_grninf_preop$HTN == "Yes (>=140/90 or history - retired since 11/15/2016)" |
+                                          vqi_pad_grninf_preop$HTN == "Yes, controlled [added on 04/13/2020]" |
+                                          vqi_pad_grninf_preop$HTN == "Yes, uncontrolled [added on 04/13/2020]", TRUE, FALSE)
+label(vqi_pad_grninf_preop$hypermed) <- "Hypertension"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("HTN"))]
+
+## Totally dependent functional status (fnstatus2).Based on the variables PREOP_FUNCSTATUS and PREOP_AMBUL.  Ambulation 
+## funcational status variable was added very recently and ambulation status will be used to infer funcitonal status.
+vqi_pad_grninf_preop$fnst_par <- ifelse(vqi_pad_grninf_preop$PREOP_FUNCSTATUS == "Assisted care" |
+                                          vqi_pad_grninf_preop$PREOP_AMBUL == "Ambulates w/ assistance or prosthesis" |
+                                          vqi_pad_grninf_preop$PREOP_AMBUL == "Ambulates w/ prosthesis" |
+                                          vqi_pad_grninf_preop$PREOP_AMBUL == "Ambulates w/ assistance", TRUE, FALSE)
+vqi_pad_grninf_preop$fnst_par <- ifelse(is.na(vqi_pad_grninf_preop$fnst_par), 
+                                      FALSE, vqi_pad_grninf_preop$fnst_par)
+label(vqi_pad_grninf_preop$fnst_par) <- "Partially Dependent Functional Status"
+
+vqi_pad_grninf_preop$fnst_dep <- ifelse(vqi_pad_grninf_preop$PREOP_FUNCSTATUS == "Bed bound" |
+                                          vqi_pad_grninf_preop$PREOP_AMBUL == "Bedridden" |
+                                          vqi_pad_grninf_preop$PREOP_AMBUL == "Wheelchair", TRUE, FALSE)
+vqi_pad_grninf_preop$fnst_dep <- ifelse(is.na(vqi_pad_grninf_preop$fnst_dep), 
+                                      FALSE, vqi_pad_grninf_preop$fnst_dep)
+label(vqi_pad_grninf_preop$fnst_dep) <- "Fully Dependent Functional Status"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("PREOP_FUNCSTATUS", "PREOP_AMBUL"))]
+
+#No variables for dyspnea, bleeding disorder, or loss of weight.
+
+#Create variable for neurological disease, include history of stroke or TIA.  We will also include whether they have had a previous intervention for cerebrovascular disease.
+
+vqi_pad_grninf_preop$neuro <- ifelse(vqi_pad_grninf_preop$PRIOR_CVD == "Hx stroke, asymptomatic" |
+                                       vqi_pad_grninf_preop$PRIOR_CVD == "Hx stroke, minor deficit" |
+                                       vqi_pad_grninf_preop$PRIOR_CVD == "Hx stroke, major deficit" |
+                                       vqi_pad_grninf_preop$PRIOR_CEACAS == "Yes" |
+                                       vqi_pad_grninf_preop$PRIOR_CEACAS == "CEA" |
+                                       vqi_pad_grninf_preop$PRIOR_CEACAS == "CAS" |
+                                       vqi_pad_grninf_preop$PRIOR_CEACAS == "Both" |
+                                       vqi_pad_grninf_preop$R_PRIOR_CEA == "TRUE", TRUE, FALSE)
+vqi_pad_grninf_preop$neuro <- replace(vqi_pad_grninf_preop$neuro, is.na(vqi_pad_grninf_preop$neuro), FALSE)
+label(vqi_pad_grninf_preop$neuro) <- "History of Cerebrovascular Disease"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("PRIOR_CVD", "PRIOR_CEACAS", "R_PRIOR_CEA"))]
+
+#Create emergent variable
+vqi_pad_grninf_preop$emrgnt <-ifelse(vqi_pad_grninf_preop$URGENCY == "Emergent", TRUE, FALSE)
+label(vqi_pad_grninf_preop$emrgnt) <- "Emergent Procedure"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("URGENCY"))]
+
+#Utilize optime variable and optime6h already created for Gwilym et al, but create variable for optime between 4-6hr - Wiseman
+vqi_pad_grninf_preop$optime46h <- ifelse(vqi_pad_grninf_preop$optime_hrs > "4" & 
+                                               vqi_pad_grninf_preop$optime_hrs < "6", TRUE, FALSE)
+label(vqi_pad_grninf_preop$optime46h) <- "Procedure Time 4-6 hours"
+vqi_pad_grninf_preop$optime6h <- ifelse(vqi_pad_grninf_preop$optime_hrs > "6", TRUE, FALSE)
+label(vqi_pad_grninf_preop$optime6h) <- "Procedure Time > 6 hours"
+
+#Create variables for ASA class 4 or for ASA class 5. Can utilize asaclas variable. - Wiseman
+vqi_pad_grninf_preop$asa_class_3 <-ifelse(vqi_pad_grninf_preop$ASACLASS == "3", TRUE, FALSE)
+label(vqi_pad_grninf_preop$asa_class_3) <- "ASA Class 3"
+
+vqi_pad_grninf_preop$asa_class_45 <-ifelse(vqi_pad_grninf_preop$ASACLASS == "4"| 
+                                             vqi_pad_grninf_preop$ASACLASS == "5", TRUE, FALSE)
+label(vqi_pad_grninf_preop$asa_class_45) <- "ASA Class 4 or 5"
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("ASACLASS"))]
+
+
+
+w_exp <- c("age65", "female",  "blkrace", "othrace", "obese", "overweight", "underweight", 
+                 "dm_ins", "dm_nonins", "smoke", "hypermed", "heart_dz", "clti", "fnst_par", "fnst_dep", "hxcopd",
+                 "esrd", "neuro",
+                 "emrgnt", "optime46h", "optime6h", "proc_ai", "proc_ler", "asa_class_3","asa_class_45")
+dep_1 <- "grninf"
+dep_2 <- "s_grninf"
+exp <- w_exp
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_1, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=") -> t2_1
+
+t2_1 <- t2_1 %>%
+  select(1,2,4,5) %>%
+  rename("Any Groin SSI" = "TRUE")
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_2, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t2_2
+
+selected_columns <- t2_2 %>%
+  select(4,6,5) %>%
+  rename("Severe Groin SSI" = "TRUE")
+
+t2 <- t2_1 %>%
+  bind_cols(selected_columns)
+
+knitr::kable(t2, align = c("l", "l", "c", "c", "c", "c", "r"))
+```
+
+## Sorour et al Model
+
+```{r Sorour Variables, warning=FALSE, message=FALSE, echo=FALSE}
+
+# Model included 1 point for BMI >30, DM with insulin, COPD, immunosuppression, surgical duration >5hrs.
+
+# There is no variables within VQI that would map to immunosuppression variable.
+
+vqi_pad_grninf_preop$optime5h <- ifelse(vqi_pad_grninf_preop$optime_hrs > "5", TRUE, FALSE)
+vqi_pad_grninf_preop$optime5h <- ifelse(is.na(vqi_pad_grninf_preop$optime5h), 
+                                         FALSE, vqi_pad_grninf_preop$optime5h)
+label(vqi_pad_grninf_preop$optime5h) <- "Procedure Time > 5 Hours"
+
+s_exp <- c("obese", "dm_ins", "dm_nonins", "hxcopd", "reop_groin", "prsth", "optime_hrs")
+dep_1 <- "grninf"
+dep_2 <- "s_grninf"
+exp <- s_exp
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_1, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=") -> t2_1
+
+t2_1 <- t2_1 %>%
+  select(1,2,4,5) %>%
+  rename("Any Groin SSI" = "TRUE")
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_2, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t2_2
+
+selected_columns <- t2_2 %>%
+  select(4,6,5) %>%
+  rename("Severe Groin SSI" = "TRUE")
+
+t2 <- t2_1 %>%
+  bind_cols(selected_columns)
+
+knitr::kable(t2, align = c("l", "l", "c", "c", "c", "c", "r"))
+
+```
+
+## Eslami et al Model
+
+```{r Eslami, warning=FALSE, message=FALSE, echo=FALSE}
+
+## Eslami et al included mFI - they used the mFI 11, however many of these variables are no longer available in NSQIP and a shorter mFI 5 has been described (Subramaniam et al).  We will use this one.  We will create variables, for functional status, diabetes, history of COPD, history of CHF, hypertension.
+
+#We develop fnst_any from the variables developed for the Wiseman Model.
+
+vqi_pad_grninf_preop$fnst_any <- ifelse(vqi_pad_grninf_preop$fnst_dep == TRUE|
+                                          vqi_pad_grninf_preop$fnst_par == TRUE, TRUE, FALSE)
+vqi_pad_grninf_preop$fnst_any <- ifelse(is.na(vqi_pad_grninf_preop$fnst_any), 
+                                      FALSE, vqi_pad_grninf_preop$fnst_any)
+label(vqi_pad_grninf_preop$fnst_any) <- "Patrially or Full Dependent Functional Status"
+
+#We will develop dm_any from the variables developed for the Gwilum Model
+
+#For COPD we will use hxcopd and for HTN we will use hypermed
+
+#Create CHF using hxCHF
+vqi_pad_grninf_preop$CHF <- ifelse(vqi_pad_grninf_preop$PRIOR_CHF == "Asymptomatic, hx only" |
+                                       vqi_pad_grninf_preop$PRIOR_CHF == "Mild" |
+                                       vqi_pad_grninf_preop$PRIOR_CHF == "Moderate" |
+                                       vqi_pad_grninf_preop$PRIOR_CHF == "Severe", TRUE, FALSE)
+label(vqi_pad_grninf_preop$CHF) <- "History of CHF"
+
+#Create 5 variable modified frailty index 
+vqi_pad_grninf_preop$mFI = (vqi_pad_grninf_preop$fnst_any + vqi_pad_grninf_preop$dm_any + vqi_pad_grninf_preop$hxcopd + vqi_pad_grninf_preop$CHF + vqi_pad_grninf_preop$hypermed)/5
+
+# We will create binary variables for different values of Cr 1.5-2 and >2
+
+vqi_pad_grninf_preop$cr_152 <- ifelse(vqi_pad_grninf_preop$CREATININE > 1.5 & vqi_pad_grninf_preop$CREATININE < 2, TRUE, FALSE)
+label(vqi_pad_grninf_preop$cr_152) <- "Creatinine 1.5-2.0 mg/dL"
+vqi_pad_grninf_preop$cr_gr2 <- ifelse(vqi_pad_grninf_preop$CREATININE >= 2, TRUE, FALSE)
+label(vqi_pad_grninf_preop$cr_gr2) <- "Creatinine >2.0 mg/dL"
+
+e_exp <- c("fnst_any", "dm_any", "hxcopd", "CHF", "hypermed", "mFI", "AGE", "female", "overweight", "obese", "cr_152", "cr_gr2", "asa_class_3", "asa_class_45")
+dep_1 <- "grninf"
+dep_2 <- "s_grninf"
+exp <- e_exp
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_1, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=") -> t2_1
+
+t2_1 <- t2_1 %>%
+  select(1,2,4,5) %>%
+  rename("Any Groin SSI" = "TRUE")
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_2, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t2_2
+
+selected_columns <- t2_2 %>%
+  select(4,6,5) %>%
+  rename("Severe Groin SSI" = "TRUE")
+
+t2 <- t2_1 %>%
+  bind_cols(selected_columns)
+
+knitr::kable(t2, align = c("l", "l", "c", "c", "c", "c", "r"))
+```
+
+## Aziz et al Model
+
+```{r Aziz Variables, warning=FALSE, message=FALSE, echo=FALSE}
+
+# Model included wound disruption, organ space SSI, LOS > 28 days, postoperative bleeding requiring transfusion, postoperative UTI, unplanned reoperation, BMI > 40, op time > 300 mins, prior ipsilateral intervention (percutaneous or bypass), COPD
+
+#We will exclude wound disruption, organ space SSI, LOS > 28 days, postoperative bleeding requiring transfusion, unplanned reoperation and postoperative UTI since these are all postoperative variables and not known in the preoperative setting.
+
+#For prior ipsilateral intervention, we will use the prrevasc_ips variable that was created for Leekha et al
+
+#Op time > 300 minutes (5 hours) will reuse variable created for Souror
+
+#Utilize hxCOPD variable for COPD.
+
+#Create variable for BMI > 40 
+vqi_pad_grninf_preop$BMI40 <- ifelse(vqi_pad_grninf_preop$BMI > "40", TRUE, FALSE)
+vqi_pad_grninf_preop$BMI40 <- ifelse(is.na(vqi_pad_grninf_preop$BMI40), 
+                                          FALSE, vqi_pad_grninf_preop$BMI40)
+label(vqi_pad_grninf_preop$BMI40) <- "BMI > 40"
+
+a_exp <- c("prrevasc_ips", "optime5h", "hxcopd", "BMI40")
+dep_1 <- "grninf"
+dep_2 <- "s_grninf"
+exp <- a_exp
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_1, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=") -> t2_1
+
+t2_1 <- t2_1 %>%
+  select(1,2,4,5) %>%
+  rename("Any Groin SSI" = "TRUE")
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_2, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t2_2
+
+selected_columns <- t2_2 %>%
+  select(4,6,5) %>%
+  rename("Severe Groin SSI" = "TRUE")
+
+t2 <- t2_1 %>%
+  bind_cols(selected_columns)
+
+knitr::kable(t2, align = c("l", "l", "c", "c", "c", "c", "r"))
+
+```
+
+## Kalish et al Model
+
+```{r Kalish Variables, warning=FALSE, message=FALSE, echo=FALSE}
+
+# Model included ABI < 0.35, procedure > 220 minutes, transfusion > 2 units pRBCs, chlorhexidine preparation (protective)
+
+#Transfusion > 2 units pRBCs was excluded because it is a postoperative variable. 
+
+#We will dichotomize teh ABI at 0.35.
+
+vqi_pad_grninf_preop$abi_35 <- 
+  ifelse((vqi_pad_grninf_preop$PREOP_ABIR < 0.35) |
+           (vqi_pad_grninf_preop$PREOP_ABIL < 0.35), TRUE, FALSE)
+vqi_pad_grninf_preop$abi_35[is.na(vqi_pad_grninf_preop$abi_35)] <- FALSE
+label(vqi_pad_grninf_preop$abi_35) <- "ABI <0.35"
+
+# Chlorhexidine was found to be protective. We will use the same variable created for chlorhexidine with and without alcohol
+
+vqi_pad_grninf_preop$prep_any_chlo <- ifelse(vqi_pad_grninf_preop$prep_aq_chlo == TRUE |
+                                                vqi_pad_grninf_preop$prep_al_chlo == TRUE, TRUE, FALSE)
+vqi_pad_grninf_preop$prep_any_chlo[is.na(vqi_pad_grninf_preop$prep_any_chlo)] <- FALSE
+label(vqi_pad_grninf_preop$prep_any_chlo) <- "Prep with Chlorhexidine w/ or w/o Alcohol"
+
+#Create variable for operative time> 220 minutes
+vqi_pad_grninf_preop$optime220 <- ifelse(vqi_pad_grninf_preop$TOTALPROCTIME >"220", TRUE, FALSE)
+vqi_pad_grninf_preop$optime220 <- ifelse(is.na(vqi_pad_grninf_preop$optime220), 
+                                         FALSE, vqi_pad_grninf_preop$optime220)
+label(vqi_pad_grninf_preop$optime220) <- "Procedure Time >220 Minutes"
+
+
+
+k_exp <- c("abi_35", "optime220", "prep_any_chlo")
+dep_1 <- "grninf"
+dep_2 <- "s_grninf"
+exp <- k_exp
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_1, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=") -> t2_1
+
+t2_1 <- t2_1 %>%
+  select(1,2,4,5) %>%
+  rename("Any Groin SSI" = "TRUE")
+
+vqi_pad_grninf_preop %>%
+  summary_factorlist(dep_2, exp, p=TRUE,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t2_2
+
+selected_columns <- t2_2 %>%
+  select(4,6,5) %>%
+  rename("Severe Groin SSI" = "TRUE")
+
+t2 <- t2_1 %>%
+  bind_cols(selected_columns)
+
+knitr::kable(t2, align = c("l", "l", "c", "c", "c", "c", "r"))
+
+```
+
+
+# Discrimination and Calbiration
+
+We performed validation for discrimination and calibration.  We performed an ROC Curve and calculated AUC to determine discrimination.  We performed a calibration plot to determine calibration.  When the full regression model was available, inclusive of the intercept, this was used for validation of both discrimination and calibration.  When no intercept was included, then the beta-coefficients or odds ratios were used only for validation of discrimination.  In these cases where a clinical nomogram was provided, this was used to validate calibration.
+
+```{r calculate prediction and nomogram values, warning=FALSE, message=FALSE, echo=FALSE}
+
+attach(vqi_pad_grninf_preop)
+
+# Calculate predicted values for Gwilym et al
+vqi_pad_grninf_preop$g_beta <- -4.846 +
+         0.535*(female) +
+         0.629*(underweight) +
+         0.264*(overweight) +
+         1.070*(obese) +
+         0.793*(heart_dz) -
+         0.394*(prep_aq_chlo) -
+         0.058*(prep_al_beta) +
+         1.024*(prep_aq_beta) +
+         0.021*(prep_two_thr) +
+         0.884*(vein) +
+         0.938*(prsth) +
+         0.142*(optime_hrs)
+vqi_pad_grninf_preop$g_pred <- 1 / (1+exp(-vqi_pad_grninf_preop$g_beta))
+
+#Calculate predicted values for Gwilym et al deep SSI model
+vqi_pad_grninf_preop$gd_beta <- -4.262 +
+         0.666*(female) +
+         0.666*(dm_any) -
+         0.108*(prep_aq_chlo) -
+         0.332*(prep_al_beta) +
+         1.418*(prep_aq_beta) +
+         0.207*(prep_two_thr) +
+         0.027*(vein) +
+         0.325*(prsth)
+vqi_pad_grninf_preop$gd_pred <- 1 / (1+exp(-vqi_pad_grninf_preop$gd_beta))
+
+#Calculate predicted values for Leekha et al
+vqi_pad_grninf_preop$l_beta <- 1.07*(clti) +
+          0.74*(hxcopd) +
+          0.99*(prrevasc_ips)
+vqi_pad_grninf_preop$l_pred <- 1 / (1+exp(-vqi_pad_grninf_preop$l_beta))
+
+vqi_pad_grninf_preop$l_score <-
+  1*clti +
+  1*hxcopd +
+  1*prrevasc_ips +
+  2*(0)
+
+vqi_pad_grninf_preop$l_nomo <- case_when(
+  vqi_pad_grninf_preop$l_score == 0 ~ 0.01,
+  vqi_pad_grninf_preop$l_score == 1 ~ 0.03,
+  vqi_pad_grninf_preop$l_score == 2 ~ 0.06,
+  vqi_pad_grninf_preop$l_score == 3 ~ 0.12,
+  vqi_pad_grninf_preop$l_score == 4 ~ 0.28,
+  vqi_pad_grninf_preop$l_score == 5 ~ 0.49
+)
+
+#Calculate predicted values for Bennett et al
+vqi_pad_grninf_preop$b_beta <- log(3.01)*(reop_groin) +
+             log(3.46)*(female) +
+             log(1.01)*(BMI) +
+             log(4.37)*(esrd) +
+             log(7.22)*(malnut) +
+             log(2.98)*(urgnt)
+vqi_pad_grninf_preop$b_pred <- 1 / (1+exp(-vqi_pad_grninf_preop$b_beta))
+
+#Calculate predicted values for Wiseman et al 
+vqi_pad_grninf_preop$w_beta <- log(1.4)*(female) +
+                log(0.9)*(age65) +
+                log(0.8)*(blkrace) +
+                log(0.9)*(othrace) +
+                log(1.3)*(overweight) +
+                log(2.3)*(obese) +
+                log(0.8)*(underweight) +
+                log(1.3)*(dm_ins) + 
+                log(1.2)*(dm_nonins) +
+                log(1.2)*(smoke) +
+                log(1.2)*(hypermed) +
+                log(1.1)*(heart_dz) +
+                log(1.2)*(clti) +
+                log(1.1)*(fnst_par) +
+                log(0.5)*(fnst_dep) +
+                log(1.1)*(hxcopd) +
+                log(1.1)*(neuro) +
+                log(1.4)*(optime46h) +
+                log(1.5)*(optime6h) +
+                log(2.4)*(proc_ai) +
+                log(3.1)*(proc_ler) +
+                log(1.2) +
+                log(0.9)*(vein) +
+                log(0.8)*(prsth) +
+                log(1.1)*(asa_class_3) +
+                log(1.2)*(asa_class_45)
+vqi_pad_grninf_preop$w_pred <- 1 / (1+exp(-vqi_pad_grninf_preop$w_beta)) 
+
+vqi_pad_grninf_preop$w_score <-
+  12*proc_ler +
+  9*proc_ai +
+  9*obese +
+  5*optime6h +
+  4*female +
+  3*overweight +
+  3*optime46h +
+  3*dm_ins +
+  2*dm_nonins +
+  2*smoke +
+  2*hypermed +
+  2*clti +
+  2*(0) + #dyspnea with moderate exercise
+  2*(1) + #groin anastomosis
+  2*asa_class_45 +
+  1*hxcopd +
+  1*heart_dz +
+  1*neuro -
+  1*age65 -
+  2*blkrace -
+  4*(0) - #sepsis complication
+  6*(0) - #renal complication
+  6*fnst_dep -
+  9*(0) #LOS >14d
+
+vqi_pad_grninf_preop$w_nomo <- case_when(
+  vqi_pad_grninf_preop$w_score < 16 ~ 0.021,
+  vqi_pad_grninf_preop$w_score >= 16 & vqi_pad_grninf_preop$w_score <= 20 ~ 0.051,
+  vqi_pad_grninf_preop$w_score >= 21 & vqi_pad_grninf_preop$w_score <= 25 ~ 0.078,
+  vqi_pad_grninf_preop$w_score >25 ~ 0.14
+)
+
+vqi_pad_grninf_preop$s_score <- obese + dm_ins + hxcopd + optime5h
+
+vqi_pad_grninf_preop$s_nomo <- case_when(
+  vqi_pad_grninf_preop$s_score == 0 ~ 0.12,
+  vqi_pad_grninf_preop$s_score == 1 ~ 0.10,
+  vqi_pad_grninf_preop$s_score == 2 ~ 0.12,
+  vqi_pad_grninf_preop$s_score == 3 ~ 0.43,
+  vqi_pad_grninf_preop$s_score == 4 ~ 0.6,
+  vqi_pad_grninf_preop$s_score == 5 ~ 1.0
+)
+
+#Calculate predicted values for Eslami et al 
+vqi_pad_grninf_preop$mFI <- as.numeric(vqi_pad_grninf_preop$mFI)
+
+vqi_pad_grninf_preop$e_beta <- log(1.01)*(mFI) +
+                log(0.98)*(AGE) +
+                log(1.3)*(female) +
+                log(1.44)*(overweight) +
+                log(2.73)*(obese) +
+                log(0.86)*(cr_152) +
+                log(1.33)*(cr_gr2) +
+                log(1.08)*(asa_class_3) + 
+                log(1.86)*(asa_class_45)
+vqi_pad_grninf_preop$e_pred <- 1 / (1+exp(-vqi_pad_grninf_preop$e_beta))
+
+#Calculate predicted values for Aziz et al 
+vqi_pad_grninf_preop$a_beta <- log(2.28)*(BMI40) +
+  log(1.98)*(optime5h) +
+  log(1.98)*(prrevasc_ips) +
+  log(1.73)*(hxcopd)
+vqi_pad_grninf_preop$a_pred <- 1 / (1+exp(-vqi_pad_grninf_preop$a_beta))
+
+#Calculate predicted values for Kalish et al 
+vqi_pad_grninf_preop$k_beta <- log(1.54)*(abi_35) +
+  log(2.11)*(optime220) +
+  log(0.53)*(prep_any_chlo)
+vqi_pad_grninf_preop$k_pred <- 1 / (1+exp(-vqi_pad_grninf_preop$k_beta))
+
+vqi_pad_grninf_preop$k_score <- optime220 + (1 - prep_any_chlo)
+
+vqi_pad_grninf_preop$k_nomo <- case_when(
+  vqi_pad_grninf_preop$k_score == 1 ~ 0.032,
+  vqi_pad_grninf_preop$k_score == 2 ~ 0.048
+)
+
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("g_beta", "gd_beta", "l_beta", "b_beta", "w_beta", 
+                                                                                     "l_score", "w_score", "s_score", "e_beta", 
+                                                                                     "a_beta", "k_beta", "k_score"))]
+```
+
+## Discrimintation for Any Groin SSI
+
+```{r ROC Curves for grninf, warning=FALSE, message=FALSE, echo=FALSE}
+# Plot ROC and calculate AUC using the yardstick package, which is a part of tidymodels
+vqi_pad_grninf_preop$grninf <- as.factor(vqi_pad_grninf_preop$grninf)
+
+# Define the predictors and outcome - we will use the nomograms in place of the predictor values because discrimination has been found to be maintained
+predictors <- list("a_pred", "b_pred", "e_pred", "g_pred", "gd_pred", "k_pred", "l_nomo", "s_nomo", "w_nomo")
+
+# Define a list to store the results
+results <- list()
+
+# Loop through each predictor - need to indicate that the event level is second because TRUE comes after FALSE
+for (pred in predictors) {
+  roc <- roc_curve(vqi_pad_grninf_preop, dep_1, pred, event_level = "second")
+  auc <- roc_auc(vqi_pad_grninf_preop, dep_1, pred, event_level = "second")
+  auc_round <- round(auc$.estimate, 2)
+  
+  # Store the results in the list
+  results[[pred]] <- list(roc = roc, auc = auc, auc_round = auc_round)
+}
+
+combined_data <- rbind(
+  data.frame(Model = "Aziz", Sensitivity = results$a_pred$roc$sensitivity, Specificity = results$a_pred$roc$specificity),
+  data.frame(Model = "Bennett", Sensitivity = results$b_pred$roc$sensitivity, Specificity = results$b_pred$roc$specificity),
+  data.frame(Model = "Eslami", Sensitivity = results$e_pred$roc$sensitivity, Specificity = results$e_pred$roc$specificity),
+  data.frame(Model = "Gwilym", Sensitivity = results$g_pred$roc$sensitivity, Specificity = results$g_pred$roc$specificity),
+  data.frame(Model = "Gwilym - Deep", Sensitivity = results$gd_pred$roc$sensitivity, Specificity = results$gd_pred$roc$specificity),
+  data.frame(Model = "Kalish", Sensitivity = results$k_pred$roc$sensitivity, Specificity = results$k_pred$roc$specificity),
+  data.frame(Model = "Leekha", Sensitivity = results$l_nomo$roc$sensitivity, Specificity = results$l_nomo$roc$specificity),
+  data.frame(Model = "Souror", Sensitivity = results$s_nomo$roc$sensitivity, Specificity = results$s_nomo$roc$specificity),
+  data.frame(Model = "Wiseman", Sensitivity = results$w_nomo$roc$sensitivity, Specificity = results$w_nomo$roc$specificity)
+)
+
+# Create the plot
+ggplot(combined_data, aes(x = 1 - Specificity, y = Sensitivity, color = Model)) +
+  geom_line() +
+  labs(title = "Combined ROC Curve", x = "False Positive Rate", y = "True Positive Rate") +
+  scale_color_manual(values = c("black", "gray", "brown", "red", "goldenrod", "green", "cyan", "blue", "magenta")) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
+  annotate("text", x = 0.75, y = 0.45, label = paste("AUC =", results$a_pred$auc_round), col = "black") +
+  annotate("text", x = 0.75, y = 0.40, label = paste("AUC =", results$b_pred$auc_round), col = "gray") +
+  annotate("text", x = 0.75, y = 0.35, label = paste("AUC =", results$e_pred$auc_round), col = "brown") +
+  annotate("text", x = 0.75, y = 0.30, label = paste("AUC =", results$g_pred$auc_round), col = "red") +
+  annotate("text", x = 0.75, y = 0.25, label = paste("AUC =", results$gd_pred$auc_round), col = "goldenrod") +
+  annotate("text", x = 0.75, y = 0.20, label = paste("AUC =", results$k_pred$auc_round), col = "green") +
+  annotate("text", x = 0.75, y = 0.15, label = paste("AUC =", results$l_nomo$auc_round), col = "cyan") +
+  annotate("text", x = 0.75, y = 0.10, label = paste("AUC =", results$s_nomo$auc_round), col = "blue") +
+  annotate("text", x = 0.75, y = 0.05, label = paste("AUC =", results$w_nomo$auc_round), col = "magenta")
+```
+## Discriminiation for Severe Groin SSI
+
+```{r ROC Curves for s_grninf, warning=FALSE, message=FALSE, echo=FALSE}
+# Plot ROC and calculate AUC using the yardstick package, which is a part of tidymodels
+vqi_pad_grninf_preop$s_grninf <- as.factor(vqi_pad_grninf_preop$s_grninf)
+
+# Define the predictors and outcome - we will use the nomograms in place of the predictor values because discrimination has been found to be maintained
+predictors <- list("a_pred", "b_pred", "e_pred", "g_pred", "gd_pred", "k_pred", "l_nomo", "s_nomo", "w_nomo")
+
+# Define a list to store the results
+results <- list()
+
+# Loop through each predictor - need to indicate that the event level is second because TRUE comes after FALSE
+for (pred in predictors) {
+  roc <- roc_curve(vqi_pad_grninf_preop, dep_2, pred, event_level = "second")
+  auc <- roc_auc(vqi_pad_grninf_preop, dep_2, pred, event_level = "second")
+  auc_round <- round(auc$.estimate, 2)
+  
+  # Store the results in the list
+  results[[pred]] <- list(roc = roc, auc = auc, auc_round = auc_round)
+}
+
+combined_data <- rbind(
+  data.frame(Model = "Aziz", Sensitivity = results$a_pred$roc$sensitivity, Specificity = results$a_pred$roc$specificity),
+  data.frame(Model = "Bennett", Sensitivity = results$b_pred$roc$sensitivity, Specificity = results$b_pred$roc$specificity),
+  data.frame(Model = "Eslami", Sensitivity = results$e_pred$roc$sensitivity, Specificity = results$e_pred$roc$specificity),
+  data.frame(Model = "Gwilym", Sensitivity = results$g_pred$roc$sensitivity, Specificity = results$g_pred$roc$specificity),
+  data.frame(Model = "Gwilym - Deep", Sensitivity = results$gd_pred$roc$sensitivity, Specificity = results$gd_pred$roc$specificity),
+  data.frame(Model = "Kalish", Sensitivity = results$k_pred$roc$sensitivity, Specificity = results$k_pred$roc$specificity),
+  data.frame(Model = "Leekha", Sensitivity = results$l_nomo$roc$sensitivity, Specificity = results$l_nomo$roc$specificity),
+  data.frame(Model = "Souror", Sensitivity = results$s_nomo$roc$sensitivity, Specificity = results$s_nomo$roc$specificity),
+  data.frame(Model = "Wiseman", Sensitivity = results$w_nomo$roc$sensitivity, Specificity = results$w_nomo$roc$specificity)
+)
+
+# Create the plot
+ggplot(combined_data, aes(x = 1 - Specificity, y = Sensitivity, color = Model)) +
+  geom_line() +
+  labs(title = "Combined ROC Curve", x = "False Positive Rate", y = "True Positive Rate") +
+  scale_color_manual(values = c("black", "gray", "brown", "red", "goldenrod", "green", "cyan", "blue", "magenta")) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
+  annotate("text", x = 0.75, y = 0.45, label = paste("AUC =", results$a_pred$auc_round), col = "black") +
+  annotate("text", x = 0.75, y = 0.40, label = paste("AUC =", results$b_pred$auc_round), col = "gray") +
+  annotate("text", x = 0.75, y = 0.35, label = paste("AUC =", results$e_pred$auc_round), col = "brown") +
+  annotate("text", x = 0.75, y = 0.30, label = paste("AUC =", results$g_pred$auc_round), col = "red") +
+  annotate("text", x = 0.75, y = 0.25, label = paste("AUC =", results$gd_pred$auc_round), col = "goldenrod") +
+  annotate("text", x = 0.75, y = 0.20, label = paste("AUC =", results$k_pred$auc_round), col = "green") +
+  annotate("text", x = 0.75, y = 0.15, label = paste("AUC =", results$l_nomo$auc_round), col = "cyan") +
+  annotate("text", x = 0.75, y = 0.10, label = paste("AUC =", results$s_nomo$auc_round), col = "blue") +
+  annotate("text", x = 0.75, y = 0.05, label = paste("AUC =", results$w_nomo$auc_round), col = "magenta")
+```
+
+## Calibration for Any Groin SSI
+
+```{r calibration plots for any groin SSI, warning=FALSE, message=FALSE, echo=FALSE}
+
+combined_cal <- rbind(
+  data.frame(model = "Gwilym", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$g_pred),
+  data.frame(model = "Gwilym - Deep", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$gd_pred),
+  data.frame(model = "Kalish", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$k_nomo),
+  data.frame(model = "Leehka", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$l_nomo),
+  data.frame(model = "Souror", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$s_nomo),
+  data.frame(model = "Wiseman", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$w_nomo)
+)
+
+min_pred <- min(combined_cal$.pred_TRUE, na.rm = TRUE)
+max_pred <- max(combined_cal$.pred_TRUE, na.rm = TRUE)
+
+filtered_cal <- combined_cal %>%
+  filter(.pred_TRUE >= min_pred & .pred_TRUE <= max_pred)
+
+filtered_cal %>%
+  cal_plot_windowed(grninf, .pred_TRUE, .by = model, event_level = "second", step_size = 0.025, include_points = FALSE) +
+  facet_wrap(~model) +
+  theme(legend.position = "none")
+
+#combined_cal %>%
+#  cal_plot_logistic(grninf, .pred_TRUE, .by = model, event_level = "second", smooth = FALSE) +
+#  facet_wrap(~model) +
+#  theme(legend.position = "none")
+
+```
+## Calibration for Severe Groin SSI
+
+```{r calibration plots for severe groin SSI, warning=FALSE, message=FALSE, echo=FALSE}
+
+combined_cal <- rbind(
+  data.frame(model = "Gwilym", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$g_pred),
+  data.frame(model = "Gwilym - Deep", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$gd_pred),
+  data.frame(model = "Kalish", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$k_nomo),
+  data.frame(model = "Leehka", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$l_nomo),
+  data.frame(model = "Souror", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$s_nomo),
+  data.frame(model = "Wiseman", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$w_nomo)
+)
+
+
+min_pred <- min(combined_cal$.pred_TRUE, na.rm = TRUE)
+max_pred <- max(combined_cal$.pred_TRUE, na.rm = TRUE)
+
+filtered_cal <- combined_cal %>%
+  filter(.pred_TRUE >= min_pred & .pred_TRUE <= max_pred)
+
+filtered_cal %>%
+  cal_plot_windowed(grninf, .pred_TRUE, .by = model, event_level = "second", step_size = 0.025, include_points = FALSE) +
+  facet_wrap(~model) +
+  theme(legend.position = "none")
+
+#combined_cal %>%
+#  cal_plot_logistic(grninf, .pred_TRUE, .by = model, event_level = "second", smooth = FALSE) +
+#  facet_wrap(~model) +
+#  theme(legend.position = "none")
+
+```
+# Export Data
+
+```{r export data, echo=FALSE, warning=FALSE, message=FALSE}
+
+vqi_pad_grninf_preop$grninf <- as.logical(vqi_pad_grninf_preop$grninf)
+
+#ff_glimpse(vqi_pad_grninf_preop)
+
+saveRDS(vqi_pad_grninf_preop, file="P:/Pro00113988 - PAD Risk Models/DataRepo/VQI/Analysis Data Files/vqi_pad_grninf_preop.rds")
+
+```
+
+```{r OLD CODE, eval=FALSE, echo=FALSE}
+g_df <- vqi_pad_grninf_preop[, c(g_exp, "grninf"), drop = FALSE]
+g_df <- g_df[complete.cases(g_df),]
+
+g_beta_coefficients <- c(
+  Intercept = -4.846,
+  female = 0.535,
+  underweight = 0.629,
+  overweight = 0.264,
+  obese = 1.070,
+  heart_dz = 0.793,
+  prep_aq_chlo = -0.394,
+  prep_al_beta = -0.058,
+  prep_aq_beta = 1.024,
+  prep_two_thr = 0.021,
+  vein = 0.884,
+  prsth = 0.938,
+  optime_hrs = 0.142
+)
+
+## Create the model matrix
+g_joined <- paste(g_exp, collapse = " + ")
+g_formula <- as.formula(paste("~", g_joined))
+model_matrix <- model.matrix(g_formula, data = g_df)
+
+## Calculate the linear predictor (g_beta)
+g_beta <- model_matrix %*% g_beta_coefficients
+
+## Calculate the predicted values using the logistic function
+g_df$.pred_TRUE <- 1 / (1 + exp(g_beta))
+
+# Calculate predicted values for Leekha et al
+l_df <- vqi_pad_grninf_preop[, c(l_exp, "grninf"), drop = FALSE]
+l_df <- l_df[complete.cases(l_df),]
+
+l_beta_coefficients <- c(
+  Intercept = 0, #The intercept is unknown so we will use 0
+  clti = 1.07,
+  hxcopd = 0.74,
+  prrevasc_ips = 0.99
+)
+
+## Create the model matrix
+l_joined <- paste(l_exp, collapse = " + ")
+l_formula <- as.formula(paste("~ ", l_joined))
+model_matrix <- model.matrix(l_formula, data = l_df)
+
+## Calculate the linear predictor (l_beta)
+l_beta <- model_matrix %*% l_beta_coefficients
+
+## Calculate the predicted values using the logistic function
+l_df$l_pred <- 1 / (1 + exp(l_beta))
+
+
+b_df <- vqi_pad_grninf_preop[, c(b_exp, "grninf"), drop = FALSE]
+b_df <- b_df[complete.cases(b_df),]
+
+b_beta_coefficients <- c(
+  Intercept = 0, #The intercept is unknown so we will use 0
+  reop_groin = log(3.01),
+  female = log(3.46),
+  BMI = log(1.01),
+  esrd = log(4.37),
+  malnut = log(7.22),
+  urgnt = log(2.98)
+)
+
+## Create the model matrix
+b_joined <- paste(b_exp, collapse = " + ")
+b_formula <- as.formula(paste("~ ", b_joined))
+model_matrix <- model.matrix(b_formula, data = b_df)
+
+## Calculate the linear predictor (b_beta)
+b_beta <- model_matrix %*% b_beta_coefficients
+
+## Calculate the predicted values using the logistic function
+b_df$b_pred <- 1 / (1 + exp(b_beta))
+
+w_df <- vqi_pad_grninf_preop[, c(w_exp, "grninf"), drop = FALSE]
+w_df <- w_df[complete.cases(w_df),]
+
+w_beta_coefficients <- c(
+  Intercept = log(1.2), #All patients have a groin anastomosis so we will include this term as the intercept, even though the intercept is not known
+  female = log(1.4),
+  age65 = log(0.9),
+  blkrace = log(0.8),
+  othrace = log(0.9),
+  overweight = log(1.3),
+  obese = log(2.3),
+  underweight = log(1.3),
+  dm_ins = log(1.3),
+  dm_nonins = log(1.2),
+  smoke = log(1.2),
+  hypermed = log(1.2),
+  heart_dz = log(1.1),
+  clti = log(1.2),
+  fnst_par = log(1.1),
+  fnst_dep = log(0.5),
+  hxcopd = log(1.1),
+  neuro = log(1.1),
+  optime46h = log(1.4),
+  optime6h = log(1.5),
+  proc_ai = log(2.4),
+  proc_ler = log(3.1),
+  vein = log(0.9),
+  prsth = log(0.8),
+  asa_class_3 = log(1.1),
+  asa_class_45 = log(1.2)
+)
+
+## Create the model matrix
+w_joined <- paste(w_exp, collapse = " + ")
+w_formula <- as.formula(paste("~ ", w_joined))
+model_matrix <- model.matrix(w_formula, data = w_df)
+
+## Calculate the linear predictor (b_beta)
+w_beta <- model_matrix %*% w_beta_coefficients
+
+## Calculate the predicted values using the logistic function
+w_df$w_pred <- 1 / (1 + exp(w_beta))
+
+l_df$grninf <- as.logical(l_df$grninf)
+l_df$grninf <- as.numeric(l_df$grninf)
+calibration_plot(data = l_df, obs = "grninf", pred = "l_pred", title = "Calibration plot for Leekha et al", y_lim = c(0, 1), x_lim=c(0, 1))
+
+b_df$grninf <- as.logical(b_df$grninf)
+b_df$grninf <- as.numeric(b_df$grninf)
+calibration_plot(data = b_df, obs = "grninf", pred = "b_pred", title = "Calibration plot for Bennett et al", y_lim = c(0, 0.7), x_lim=c(0, 0.7))
+
+w_df$grninf <- as.logical(w_df$grninf)
+w_df$grninf <- as.numeric(w_df$grninf)
+calibration_plot(data = w_df, obs = "grninf", pred = "w_pred", title = "Calibration plot for Wiseman et al", y_lim = c(0, 1), x_lim=c(0, 1))
+
+#General ROC curves - replaced with a loop
+roc_g <- roc_curve(vqi_pad_grninf_preop, grninf, g_pred)
+auc_g <- roc_auc(vqi_pad_grninf_preop, grninf, g_pred)
+auc_g_round <- round(auc_g$.estimate, 2)
+
+roc_gd <- roc_curve(vqi_pad_grninf_preop, grninf, gd_pred)
+auc_gd <- roc_auc(vqi_pad_grninf_preop, grninf, gd_pred)
+auc_gd_round <- round(auc_gd$.estimate, 2)
+
+roc_l <- roc_curve(vqi_pad_grninf_preop, grninf, l_pred)
+auc_l <- roc_auc(vqi_pad_grninf_preop, grninf, l_pred)
+auc_l_round <- round(auc_l$.estimate, 2)
+
+roc_ln <- roc_curve(vqi_pad_grninf_preop, grninf, l_nomo)
+auc_ln <- roc_auc(vqi_pad_grninf_preop, grninf, l_nomo)
+auc_ln_round <- round(auc_ln$.estimate, 2)
+
+roc_b <- roc_curve(vqi_pad_grninf_preop, grninf, b_pred)
+auc_b <- roc_auc(vqi_pad_grninf_preop, grninf, b_pred)
+auc_b_round <- round(auc_b$.estimate, 2)
+
+roc_w <- roc_curve(vqi_pad_grninf_preop, grninf, w_pred)
+auc_w <- roc_auc(vqi_pad_grninf_preop, grninf, w_pred)
+auc_w_round <- round(auc_w$.estimate, 2)
+
+roc_wn <- roc_curve(vqi_pad_grninf_preop, grninf, w_nomo)
+auc_wn <- roc_auc(vqi_pad_grninf_preop, grninf, w_nomo)
+auc_wn_round <- round(auc_wn$.estimate, 2)
+
+#w_df <- vqi_pad_grninf_preop[, c(w_exp, "grninf", "w_score", "w_nomo"), drop = FALSE]
+#w_df <- w_df[complete.cases(w_df),]
+#w_df$w_score <- as.numeric(w_df$w_score)
+
+#summary(w_df$w_score)
+
+#event_rate <- w_df %>%
+#  group_by(w_score) %>%
+#  summarise(rate = mean(grninf, na.rm = TRUE))
+
+#exp <- c("w_score")
+
+#w_df %>%
+#  summary_factorlist(dependent, exp, p=TRUE, add_dependent_label=TRUE,
+#                     add_col_totals = TRUE, column = FALSE,
+#                     include_col_totals_percent = FALSE,
+#                     col_totals_rowname = "",
+#                     col_totals_prefix = "N=") -> w_t2
+#knitr::kable(w_t2, align = c("l", "l", "r", "r", "r"))
+
+#print(event_rate)
+#roc <- roc_curve(w_df, grninf, w_score)
+#autoplot(roc)
+
+```
+
