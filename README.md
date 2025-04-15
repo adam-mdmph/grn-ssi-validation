@@ -1,0 +1,1 @@
+This code was developed for a research project for the external validation of previously published groin surgical site infections after open lower extremity revascularization.  The publication is in the process of submission and will be made available once it has completed peer review.
