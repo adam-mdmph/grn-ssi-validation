@@ -57,10 +57,10 @@ source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem
 ```{r import cleaned data, select and merge, echo=FALSE}
 
 # Run source code to select relevant cases based on PRIMARY CPT from PUF files across the years of interest
-source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem_inf_select_bind.R")
+source("code/vasc_fem_inf_select_bind.R")
 
 # Combine relevant procedure targeted data sets
-source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/combine_tar.R")
+source("code/combine_tar.R")
 
 # Combine puf files and procedure targeted files, keep all cases regardless of whether they have procedure targeted data
 
