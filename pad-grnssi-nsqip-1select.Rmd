@@ -46,10 +46,10 @@ years <- c("13", "14", "15_v2", "16", "17", "18_v2", "19", "20")
 
 # Create a vector with relevant CPTs of interest
 ## Create CPT groups
-source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem_inf_cpt_groups.R")
+source("code/vasc_fem_inf_cpt_groups.R")
 
 ## Create ICD Groups
-source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem_inf_icd_groups.R")
+source("code/vasc_fem_inf_icd_groups.R")
 
 #cat(paste(icd_prrevasc, collapse = ", "))
 ```

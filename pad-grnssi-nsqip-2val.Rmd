@@ -5,7 +5,7 @@ author: Eden Singh and Adam Johnson
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output:
   word_document:
-knit: (function(input, ...) {rmarkdown::render(input, output_file = paste0(tools::file_path_sans_ext(basename(input)), '-', Sys.Date(), '.docx'))})
+knit: (function(input, ...) {rmarkdown::render(input, output_file = paste0(tools::file_path_sans_ext(basename(input)), '-', Sys.Date(), '.docx'), output_dir = "reports")})
 ---
 # Purpose Statement:
 
@@ -20,12 +20,15 @@ library(tidyverse)
 library(finalfit)
 library(tidymodels)
 library(probably)
+library(pROC)
 library(survival)
 library(survminer)
 library(predtools)
 library(magrittr)
 library(Hmisc)
 library(labelled)
+
+#utils::sessionInfo()
 ```
 
 We import data that was selected from the PUF files with the following CPT codes to identify the procedures that involved an open groin incision:
@@ -780,7 +783,7 @@ puf_pad_grninf_preop$prrevasc <- ifelse(is.na(puf_pad_grninf_preop$prrevasc),
 label(puf_pad_grninf_preop$prrevasc) <- "Previous Ipsilateral Revascularization"
 
 
-#Op time > 300 minutes (5 hours) will reuse variable created for Souror
+#Op time > 300 minutes (5 hours) will reuse variable created for Sorour
 puf_pad_grninf_preop$optime5h <- ifelse(puf_pad_grninf_preop$optime_hrs > "5", TRUE, FALSE)
 puf_pad_grninf_preop$optime5h <- ifelse(is.na(puf_pad_grninf_preop$optime5h), 
                                          FALSE, puf_pad_grninf_preop$optime5h)
@@ -1083,16 +1086,29 @@ puf_pad_grninf_preop <- puf_pad_grninf_preop[ , !(names(puf_pad_grninf_preop) %i
 puf_pad_grninf_preop$grninf <- as.factor(puf_pad_grninf_preop$grninf)
 
 # Define the predictors and outcome - we will use the nomograms in place of the predictor values because discrimination has been found to be maintained
+df <- puf_pad_grninf_preop
 predictors <- list("a_pred", "b_pred", "e_pred", "g_pred", "gd_pred", "k_pred", "l_nomo", "s_nomo", "w_nomo")
 
 # Define a list to store the results
 results <- list()
 
+
 # Loop through each predictor - need to indicate that the event level is second because TRUE comes after FALSE
 for (pred in predictors) {
-  roc <- roc_curve(puf_pad_grninf_preop, dep_1, pred, event_level = "second")
-  auc <- roc_auc(puf_pad_grninf_preop, dep_1, pred, event_level = "second")
+  roc <- roc_curve(df, dep_1, pred, event_level = "second")
+  auc <- roc_auc(df, dep_1, pred, event_level = "second")
+  roc_obj <- roc(response = df[[dep_1]], predictor = df[[pred]])
   auc_round <- round(auc$.estimate, 2)
+  ci  <- ci.auc(roc_obj)
+
+  auc_round <- paste(
+  round(auc$.estimate, 2), " (", 
+  round(ci[1], 2), 
+  "-", 
+  round(ci[3], 2), 
+  ")", 
+  sep = ""
+)
   
   # Store the results in the list
   results[[pred]] <- list(roc = roc, auc = auc, auc_round = auc_round)
@@ -1106,7 +1122,7 @@ combined_data <- rbind(
   data.frame(Model = "Gwilym - Deep", Sensitivity = results$gd_pred$roc$sensitivity, Specificity = results$gd_pred$roc$specificity),
   data.frame(Model = "Kalish", Sensitivity = results$k_pred$roc$sensitivity, Specificity = results$k_pred$roc$specificity),
   data.frame(Model = "Leekha", Sensitivity = results$l_nomo$roc$sensitivity, Specificity = results$l_nomo$roc$specificity),
-  data.frame(Model = "Souror", Sensitivity = results$s_nomo$roc$sensitivity, Specificity = results$s_nomo$roc$specificity),
+  data.frame(Model = "Sorour", Sensitivity = results$s_nomo$roc$sensitivity, Specificity = results$s_nomo$roc$specificity),
   data.frame(Model = "Wiseman", Sensitivity = results$w_nomo$roc$sensitivity, Specificity = results$w_nomo$roc$specificity)
 )
 
@@ -1116,24 +1132,25 @@ ggplot(combined_data, aes(x = 1 - Specificity, y = Sensitivity, color = Model)) 
   labs(title = "Combined ROC Curve", x = "False Positive Rate", y = "True Positive Rate") +
   scale_color_manual(values = c("black", "gray", "brown", "red", "goldenrod", "green", "cyan", "blue", "magenta")) +
   geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
-  annotate("text", x = 0.75, y = 0.45, label = paste("AUC =", results$a_pred$auc_round), col = "black") +
-  annotate("text", x = 0.75, y = 0.40, label = paste("AUC =", results$b_pred$auc_round), col = "gray") +
-  annotate("text", x = 0.75, y = 0.35, label = paste("AUC =", results$e_pred$auc_round), col = "brown") +
-  annotate("text", x = 0.75, y = 0.30, label = paste("AUC =", results$g_pred$auc_round), col = "red") +
-  annotate("text", x = 0.75, y = 0.25, label = paste("AUC =", results$gd_pred$auc_round), col = "goldenrod") +
-  annotate("text", x = 0.75, y = 0.20, label = paste("AUC =", results$k_pred$auc_round), col = "green") +
-  annotate("text", x = 0.75, y = 0.15, label = paste("AUC =", results$l_nomo$auc_round), col = "cyan") +
-  annotate("text", x = 0.75, y = 0.10, label = paste("AUC =", results$s_nomo$auc_round), col = "blue") +
-  annotate("text", x = 0.75, y = 0.05, label = paste("AUC =", results$w_nomo$auc_round), col = "magenta")
+  annotate("text", x = 0.75, y = 0.45, label = paste("AUC =", results$a_pred$auc_round), col = "black", size = 3) +
+  annotate("text", x = 0.75, y = 0.40, label = paste("AUC =", results$b_pred$auc_round), col = "gray", size = 3) +
+  annotate("text", x = 0.75, y = 0.35, label = paste("AUC =", results$e_pred$auc_round), col = "brown", size = 3) +
+  annotate("text", x = 0.75, y = 0.30, label = paste("AUC =", results$g_pred$auc_round), col = "red", size = 3) +
+  annotate("text", x = 0.75, y = 0.25, label = paste("AUC =", results$gd_pred$auc_round), col = "goldenrod", size = 3) +
+  annotate("text", x = 0.75, y = 0.20, label = paste("AUC =", results$k_pred$auc_round), col = "green", size = 3) +
+  annotate("text", x = 0.75, y = 0.15, label = paste("AUC =", results$l_nomo$auc_round), col = "cyan", size = 3) +
+  annotate("text", x = 0.75, y = 0.10, label = paste("AUC =", results$s_nomo$auc_round), col = "blue", size = 3) +
+  annotate("text", x = 0.75, y = 0.05, label = paste("AUC =", results$w_nomo$auc_round), col = "magenta", size = 3)
 ```
 
-### Discriminiation for Severe Groin SSI
+## Discriminiation for Severe Groin SSI
 
 ```{r ROC Curves for s_grninf, warning=FALSE, message=FALSE, echo=FALSE}
 # Plot ROC and calculate AUC using the yardstick package, which is a part of tidymodels
 puf_pad_grninf_preop$s_grninf <- as.factor(puf_pad_grninf_preop$s_grninf)
 
 # Define the predictors and outcome - we will use the nomograms in place of the predictor values because discrimination has been found to be maintained
+df <- puf_pad_grninf_preop
 predictors <- list("a_pred", "b_pred", "e_pred", "g_pred", "gd_pred", "k_pred", "l_nomo", "s_nomo", "w_nomo")
 
 # Define a list to store the results
@@ -1141,9 +1158,20 @@ results <- list()
 
 # Loop through each predictor - need to indicate that the event level is second because TRUE comes after FALSE
 for (pred in predictors) {
-  roc <- roc_curve(puf_pad_grninf_preop, dep_2, pred, event_level = "second")
-  auc <- roc_auc(puf_pad_grninf_preop, dep_2, pred, event_level = "second")
+  roc <- roc_curve(df, dep_2, pred, event_level = "second")
+  auc <- roc_auc(df, dep_2, pred, event_level = "second")
+  roc_obj <- roc(response = df[[dep_2]], predictor = df[[pred]])
   auc_round <- round(auc$.estimate, 2)
+  ci  <- ci.auc(roc_obj)
+
+  auc_round <- paste(
+  round(auc$.estimate, 2), " (", 
+  round(ci[1], 2), 
+  "-", 
+  round(ci[3], 2), 
+  ")", 
+  sep = ""
+)
   
   # Store the results in the list
   results[[pred]] <- list(roc = roc, auc = auc, auc_round = auc_round)
@@ -1157,7 +1185,7 @@ combined_data <- rbind(
   data.frame(Model = "Gwilym - Deep", Sensitivity = results$gd_pred$roc$sensitivity, Specificity = results$gd_pred$roc$specificity),
   data.frame(Model = "Kalish", Sensitivity = results$k_pred$roc$sensitivity, Specificity = results$k_pred$roc$specificity),
   data.frame(Model = "Leekha", Sensitivity = results$l_nomo$roc$sensitivity, Specificity = results$l_nomo$roc$specificity),
-  data.frame(Model = "Souror", Sensitivity = results$s_nomo$roc$sensitivity, Specificity = results$s_nomo$roc$specificity),
+  data.frame(Model = "Sorour", Sensitivity = results$s_nomo$roc$sensitivity, Specificity = results$s_nomo$roc$specificity),
   data.frame(Model = "Wiseman", Sensitivity = results$w_nomo$roc$sensitivity, Specificity = results$w_nomo$roc$specificity)
 )
 
@@ -1167,15 +1195,15 @@ ggplot(combined_data, aes(x = 1 - Specificity, y = Sensitivity, color = Model)) 
   labs(title = "Combined ROC Curve", x = "False Positive Rate", y = "True Positive Rate") +
   scale_color_manual(values = c("black", "gray", "brown", "red", "goldenrod", "green", "cyan", "blue", "magenta")) +
   geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
-  annotate("text", x = 0.75, y = 0.45, label = paste("AUC =", results$a_pred$auc_round), col = "black") +
-  annotate("text", x = 0.75, y = 0.40, label = paste("AUC =", results$b_pred$auc_round), col = "gray") +
-  annotate("text", x = 0.75, y = 0.35, label = paste("AUC =", results$e_pred$auc_round), col = "brown") +
-  annotate("text", x = 0.75, y = 0.30, label = paste("AUC =", results$g_pred$auc_round), col = "red") +
-  annotate("text", x = 0.75, y = 0.25, label = paste("AUC =", results$gd_pred$auc_round), col = "goldenrod") +
-  annotate("text", x = 0.75, y = 0.20, label = paste("AUC =", results$k_pred$auc_round), col = "green") +
-  annotate("text", x = 0.75, y = 0.15, label = paste("AUC =", results$l_nomo$auc_round), col = "cyan") +
-  annotate("text", x = 0.75, y = 0.10, label = paste("AUC =", results$s_nomo$auc_round), col = "blue") +
-  annotate("text", x = 0.75, y = 0.05, label = paste("AUC =", results$w_nomo$auc_round), col = "magenta")
+  annotate("text", x = 0.75, y = 0.45, label = paste("AUC =", results$a_pred$auc_round), col = "black", size = 3) +
+  annotate("text", x = 0.75, y = 0.40, label = paste("AUC =", results$b_pred$auc_round), col = "gray", size = 3) +
+  annotate("text", x = 0.75, y = 0.35, label = paste("AUC =", results$e_pred$auc_round), col = "brown", size = 3) +
+  annotate("text", x = 0.75, y = 0.30, label = paste("AUC =", results$g_pred$auc_round), col = "red", size = 3) +
+  annotate("text", x = 0.75, y = 0.25, label = paste("AUC =", results$gd_pred$auc_round), col = "goldenrod", size = 3) +
+  annotate("text", x = 0.75, y = 0.20, label = paste("AUC =", results$k_pred$auc_round), col = "green", size = 3) +
+  annotate("text", x = 0.75, y = 0.15, label = paste("AUC =", results$l_nomo$auc_round), col = "cyan", size = 3) +
+  annotate("text", x = 0.75, y = 0.10, label = paste("AUC =", results$s_nomo$auc_round), col = "blue", size = 3) +
+  annotate("text", x = 0.75, y = 0.05, label = paste("AUC =", results$w_nomo$auc_round), col = "magenta", size = 3)
 ```
 
 ## Calibration for Any Groin SSI
@@ -1187,7 +1215,7 @@ combined_cal <- rbind(
   data.frame(model = "Gwilym - Deep", grninf = puf_pad_grninf_preop$grninf, .pred_TRUE = puf_pad_grninf_preop$gd_pred),
   data.frame(model = "Kalish", grninf = puf_pad_grninf_preop$grninf, .pred_TRUE = puf_pad_grninf_preop$k_nomo),
   data.frame(model = "Leehka", grninf = puf_pad_grninf_preop$grninf, .pred_TRUE = puf_pad_grninf_preop$l_nomo),
-  data.frame(model = "Souror", grninf = puf_pad_grninf_preop$grninf, .pred_TRUE = puf_pad_grninf_preop$s_nomo),
+  data.frame(model = "Sorour", grninf = puf_pad_grninf_preop$grninf, .pred_TRUE = puf_pad_grninf_preop$s_nomo),
   data.frame(model = "Wiseman", grninf = puf_pad_grninf_preop$grninf, .pred_TRUE = puf_pad_grninf_preop$w_nomo)
 )
 
@@ -1218,10 +1246,9 @@ combined_cal <- rbind(
   data.frame(model = "Gwilym - Deep", grninf = puf_pad_grninf_preop$s_grninf, .pred_TRUE = puf_pad_grninf_preop$gd_pred),
   data.frame(model = "Kalish", grninf = puf_pad_grninf_preop$s_grninf, .pred_TRUE = puf_pad_grninf_preop$k_nomo),
   data.frame(model = "Leehka", grninf = puf_pad_grninf_preop$s_grninf, .pred_TRUE = puf_pad_grninf_preop$l_nomo),
-  data.frame(model = "Souror", grninf = puf_pad_grninf_preop$s_grninf, .pred_TRUE = puf_pad_grninf_preop$s_nomo),
+  data.frame(model = "Sorour", grninf = puf_pad_grninf_preop$s_grninf, .pred_TRUE = puf_pad_grninf_preop$s_nomo),
   data.frame(model = "Wiseman", grninf = puf_pad_grninf_preop$s_grninf, .pred_TRUE = puf_pad_grninf_preop$w_nomo)
 )
-
 
 min_pred <- min(combined_cal$.pred_TRUE, na.rm = TRUE)
 max_pred <- max(combined_cal$.pred_TRUE, na.rm = TRUE)

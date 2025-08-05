@@ -4,7 +4,7 @@ author: Hana Shafique and Adam Johnson
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output:
   word_document:
-knit: (function(input, ...) {rmarkdown::render(input, output_file = paste0(tools::file_path_sans_ext(basename(input)), '-', Sys.Date(), '.docx'))})
+knit: (function(input, ...) {rmarkdown::render(input, output_file = paste0(tools::file_path_sans_ext(basename(input)), '-', Sys.Date(), '.docx'), output_dir = "reports")})
 ---
 
 # Purpose Statement:
@@ -21,16 +21,21 @@ library(tidyverse)
 library(finalfit)
 library(tidymodels)
 library(probably)
+library(pROC)
 library(survival)
 library(survminer)
 library(predtools)
 library(magrittr)
 library(Hmisc)
 library(labelled)
+library(renv)
+
+#utils::sessionInfo()
 ```
 
 ```{r import and select relevant variables, echo=FALSE, warning=FALSE, message=FALSE}
-vqi_pad_grninf_clean <- readRDS("P:/Pro00113988 - PAD Risk Models/DataRepo/VQI/Analysis Data Files/vqi_pad.rds")
+#First we load data exported from "pad-grnssi-vqi-1select.rmd."  We keep this data outside this project as it is used by many different projects.
+vqi_pad_grninf_clean <- readRDS("../../DataRepo/VQI/Analysis Data Files/vqi_pad.rds")
 
 grninf_preop_v <- c("POSTOP_SSI","GRAFTINF","RTOR","RTORINF", "WCOMP", "POSTOP_LOS",
                     "PRIMPROCID","REGIONID","CENTERID","PHYSICIANID","PATIENTID",
@@ -107,13 +112,10 @@ We define our outcome as a binary variable inclusive of superficial, deep and or
 # We will define SSI as reported anytime during following.  Some LTF dates are >1 year and report an SSI, however unclear the timing of the actual SSI.
 
 # Import and clean data from LTF data sets
-
-#infra_ltf <- read_csv("P:/Pro00113988 - PAD Risk Models/DataRepo/VQI/INFRA_International_20231201/INFRA_International_LTF_20231201.csv")
-source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem_inf_vqi_clean_infra_ltf.R")
+source("code/vasc_fem_inf_vqi_clean_infra_ltf.R")
 infra_ltf_grninf <- infra_ltf %>% select(allVars_infra_ltf)
 
-#supra_ltf <- read_csv("P:/Pro00113988 - PAD Risk Models/DataRepo/VQI/SUPRA_International_20231201/SUPRA_International_LTF_20231201.csv")
-source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem_inf_vqi_clean_supra_ltf.R")
+source("code/vasc_fem_inf_vqi_clean_supra_ltf.R")
 supra_ltf_grninf <- supra_ltf %>% select(allVars_supra_ltf)
 
 pad_ltf_grninf <- bind_rows(infra_ltf_grninf,supra_ltf_grninf)
@@ -243,6 +245,8 @@ rm(list = c("infra_ltf_grninf", "pad_ltf_grninf", "supra_ltf", "supra_ltf_grninf
             "vqi_pad_grninf_preop_proc", "allVars_infra_ltf", "allVars_supra_ltf", "pad_ltf_grninf_surv",
             "pad_ltf_grninf_surv_trim"))
 
+vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("grninf_ltf", "s_grninf_ltf", "grninf_proc", "s_grninf_proc"))]
+
 #vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("POSTOP_SSI", "GRAFTINF", "RTOR", "RTORINF", "WCOMP", #'POSTOP_LOS', 'LTF_DAYS', 'LTF_SSIGRAFT', 'D30_WOUNDCOMP_NECROSIS', 'D30_WOUNDCOMP_HEMATOMA', 'D30_WOUNDCOMP_SEROMA', 'D30_WOUNDCOMP_LYMPH_LEAK', #'D30_WOUNDCOMP_DEHISCENCE', 'D30_WOUNDCOMP_OTHER',            'D30_VASCCOMP_BLEEDING', 'R_D30_GRAFT', 'LTF_SSI','FWP_TIMEPOINT', #'D30_ADMISSION_REASON', 'D30_SSI', 'R_D30_SSI', 'grninf_ltf', 'grninf_surv','grninf_proc'))]
 
 #Select for centers who report more than 10 events
@@ -265,11 +269,25 @@ Table 1: VQI cohort patient demographics.
 
 vqi_pad_grninf_preop <- droplevels(vqi_pad_grninf_preop)
 
-label(vqi_pad_grninf_preop$GENDER) <- "Sex"
-label(vqi_pad_grninf_preop$RACE) <- "Race"
-label(vqi_pad_grninf_preop$SURGYEAR) <- "Operative Year"
-label(vqi_pad_grninf_preop$indication) <- "Indication"
-label(vqi_pad_grninf_preop$proc) <- "Procedure"
+#Label the variables for the table - need to use "ff_label" no the labelled package.
+vqi_pad_grninf_preop$AGE %>%
+  ff_label("Age in Years") %>%
+  str()
+vqi_pad_grninf_preop$GENDER %>%
+  ff_label("Sex") %>%
+  str()
+vqi_pad_grninf_preop$RACE %>%
+  ff_label("Race") %>%
+  str()
+vqi_pad_grninf_preop$SURGYEAR %>%
+  ff_label("Operative Year") %>%
+  str()
+vqi_pad_grninf_preop$indication %>%
+  ff_label("Indication") %>%
+  str()
+vqi_pad_grninf_preop$proc %>%
+  ff_label("Procedure") %>%
+  str()
 
 t1_exp <- c("AGE", "GENDER", "RACE", "indication", "proc")
 dep_1 <- "grninf"
@@ -1033,7 +1051,7 @@ knitr::kable(t2, align = c("l", "l", "c", "c", "c", "c", "r"))
 
 #For prior ipsilateral intervention, we will use the prrevasc_ips variable that was created for Leekha et al
 
-#Op time > 300 minutes (5 hours) will reuse variable created for Souror
+#Op time > 300 minutes (5 hours) will reuse variable created for Sorour
 
 #Utilize hxCOPD variable for COPD.
 
@@ -1323,13 +1341,14 @@ vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %i
                                                                                      "a_beta", "k_beta", "k_score"))]
 ```
 
-## Discrimintation for Any Groin SSI
+## Discrimination for Any Groin SSI
 
 ```{r ROC Curves for grninf, warning=FALSE, message=FALSE, echo=FALSE}
 # Plot ROC and calculate AUC using the yardstick package, which is a part of tidymodels
 vqi_pad_grninf_preop$grninf <- as.factor(vqi_pad_grninf_preop$grninf)
 
 # Define the predictors and outcome - we will use the nomograms in place of the predictor values because discrimination has been found to be maintained
+df <- vqi_pad_grninf_preop
 predictors <- list("a_pred", "b_pred", "e_pred", "g_pred", "gd_pred", "k_pred", "l_nomo", "s_nomo", "w_nomo")
 
 # Define a list to store the results
@@ -1337,9 +1356,20 @@ results <- list()
 
 # Loop through each predictor - need to indicate that the event level is second because TRUE comes after FALSE
 for (pred in predictors) {
-  roc <- roc_curve(vqi_pad_grninf_preop, dep_1, pred, event_level = "second")
-  auc <- roc_auc(vqi_pad_grninf_preop, dep_1, pred, event_level = "second")
+  roc <- roc_curve(df, dep_1, pred, event_level = "second")
+  auc <- roc_auc(df, dep_1, pred, event_level = "second")
+  roc_obj <- roc(response = df[[dep_1]], predictor = df[[pred]])
   auc_round <- round(auc$.estimate, 2)
+  ci  <- ci.auc(roc_obj)
+
+  auc_round <- paste(
+  round(auc$.estimate, 2), " (", 
+  round(ci[1], 2), 
+  "-", 
+  round(ci[3], 2), 
+  ")", 
+  sep = ""
+)
   
   # Store the results in the list
   results[[pred]] <- list(roc = roc, auc = auc, auc_round = auc_round)
@@ -1353,7 +1383,7 @@ combined_data <- rbind(
   data.frame(Model = "Gwilym - Deep", Sensitivity = results$gd_pred$roc$sensitivity, Specificity = results$gd_pred$roc$specificity),
   data.frame(Model = "Kalish", Sensitivity = results$k_pred$roc$sensitivity, Specificity = results$k_pred$roc$specificity),
   data.frame(Model = "Leekha", Sensitivity = results$l_nomo$roc$sensitivity, Specificity = results$l_nomo$roc$specificity),
-  data.frame(Model = "Souror", Sensitivity = results$s_nomo$roc$sensitivity, Specificity = results$s_nomo$roc$specificity),
+  data.frame(Model = "Sorour", Sensitivity = results$s_nomo$roc$sensitivity, Specificity = results$s_nomo$roc$specificity),
   data.frame(Model = "Wiseman", Sensitivity = results$w_nomo$roc$sensitivity, Specificity = results$w_nomo$roc$specificity)
 )
 
@@ -1363,23 +1393,24 @@ ggplot(combined_data, aes(x = 1 - Specificity, y = Sensitivity, color = Model)) 
   labs(title = "Combined ROC Curve", x = "False Positive Rate", y = "True Positive Rate") +
   scale_color_manual(values = c("black", "gray", "brown", "red", "goldenrod", "green", "cyan", "blue", "magenta")) +
   geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
-  annotate("text", x = 0.75, y = 0.45, label = paste("AUC =", results$a_pred$auc_round), col = "black") +
-  annotate("text", x = 0.75, y = 0.40, label = paste("AUC =", results$b_pred$auc_round), col = "gray") +
-  annotate("text", x = 0.75, y = 0.35, label = paste("AUC =", results$e_pred$auc_round), col = "brown") +
-  annotate("text", x = 0.75, y = 0.30, label = paste("AUC =", results$g_pred$auc_round), col = "red") +
-  annotate("text", x = 0.75, y = 0.25, label = paste("AUC =", results$gd_pred$auc_round), col = "goldenrod") +
-  annotate("text", x = 0.75, y = 0.20, label = paste("AUC =", results$k_pred$auc_round), col = "green") +
-  annotate("text", x = 0.75, y = 0.15, label = paste("AUC =", results$l_nomo$auc_round), col = "cyan") +
-  annotate("text", x = 0.75, y = 0.10, label = paste("AUC =", results$s_nomo$auc_round), col = "blue") +
-  annotate("text", x = 0.75, y = 0.05, label = paste("AUC =", results$w_nomo$auc_round), col = "magenta")
+  annotate("text", x = 0.75, y = 0.45, label = paste("AUC =", results$a_pred$auc_round), col = "black", size = 3) +
+  annotate("text", x = 0.75, y = 0.40, label = paste("AUC =", results$b_pred$auc_round), col = "gray", size = 3) +
+  annotate("text", x = 0.75, y = 0.35, label = paste("AUC =", results$e_pred$auc_round), col = "brown", size = 3) +
+  annotate("text", x = 0.75, y = 0.30, label = paste("AUC =", results$g_pred$auc_round), col = "red", size = 3) +
+  annotate("text", x = 0.75, y = 0.25, label = paste("AUC =", results$gd_pred$auc_round), col = "goldenrod", size = 3) +
+  annotate("text", x = 0.75, y = 0.20, label = paste("AUC =", results$k_pred$auc_round), col = "green", size = 3) +
+  annotate("text", x = 0.75, y = 0.15, label = paste("AUC =", results$l_nomo$auc_round), col = "cyan", size = 3) +
+  annotate("text", x = 0.75, y = 0.10, label = paste("AUC =", results$s_nomo$auc_round), col = "blue", size = 3) +
+  annotate("text", x = 0.75, y = 0.05, label = paste("AUC =", results$w_nomo$auc_round), col = "magenta", size = 3)
 ```
-## Discriminiation for Severe Groin SSI
+##Discriminiation for Severe Groin SSI
 
 ```{r ROC Curves for s_grninf, warning=FALSE, message=FALSE, echo=FALSE}
 # Plot ROC and calculate AUC using the yardstick package, which is a part of tidymodels
 vqi_pad_grninf_preop$s_grninf <- as.factor(vqi_pad_grninf_preop$s_grninf)
 
 # Define the predictors and outcome - we will use the nomograms in place of the predictor values because discrimination has been found to be maintained
+df <- vqi_pad_grninf_preop
 predictors <- list("a_pred", "b_pred", "e_pred", "g_pred", "gd_pred", "k_pred", "l_nomo", "s_nomo", "w_nomo")
 
 # Define a list to store the results
@@ -1387,9 +1418,20 @@ results <- list()
 
 # Loop through each predictor - need to indicate that the event level is second because TRUE comes after FALSE
 for (pred in predictors) {
-  roc <- roc_curve(vqi_pad_grninf_preop, dep_2, pred, event_level = "second")
-  auc <- roc_auc(vqi_pad_grninf_preop, dep_2, pred, event_level = "second")
+  roc <- roc_curve(df, dep_2, pred, event_level = "second")
+  auc <- roc_auc(df, dep_2, pred, event_level = "second")
+  roc_obj <- roc(response = df[[dep_2]], predictor = df[[pred]])
   auc_round <- round(auc$.estimate, 2)
+  ci  <- ci.auc(roc_obj)
+
+  auc_round <- paste(
+  round(auc$.estimate, 2), " (", 
+  round(ci[1], 2), 
+  "-", 
+  round(ci[3], 2), 
+  ")", 
+  sep = ""
+)
   
   # Store the results in the list
   results[[pred]] <- list(roc = roc, auc = auc, auc_round = auc_round)
@@ -1403,7 +1445,7 @@ combined_data <- rbind(
   data.frame(Model = "Gwilym - Deep", Sensitivity = results$gd_pred$roc$sensitivity, Specificity = results$gd_pred$roc$specificity),
   data.frame(Model = "Kalish", Sensitivity = results$k_pred$roc$sensitivity, Specificity = results$k_pred$roc$specificity),
   data.frame(Model = "Leekha", Sensitivity = results$l_nomo$roc$sensitivity, Specificity = results$l_nomo$roc$specificity),
-  data.frame(Model = "Souror", Sensitivity = results$s_nomo$roc$sensitivity, Specificity = results$s_nomo$roc$specificity),
+  data.frame(Model = "Sorour", Sensitivity = results$s_nomo$roc$sensitivity, Specificity = results$s_nomo$roc$specificity),
   data.frame(Model = "Wiseman", Sensitivity = results$w_nomo$roc$sensitivity, Specificity = results$w_nomo$roc$specificity)
 )
 
@@ -1413,15 +1455,15 @@ ggplot(combined_data, aes(x = 1 - Specificity, y = Sensitivity, color = Model)) 
   labs(title = "Combined ROC Curve", x = "False Positive Rate", y = "True Positive Rate") +
   scale_color_manual(values = c("black", "gray", "brown", "red", "goldenrod", "green", "cyan", "blue", "magenta")) +
   geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "gray") +
-  annotate("text", x = 0.75, y = 0.45, label = paste("AUC =", results$a_pred$auc_round), col = "black") +
-  annotate("text", x = 0.75, y = 0.40, label = paste("AUC =", results$b_pred$auc_round), col = "gray") +
-  annotate("text", x = 0.75, y = 0.35, label = paste("AUC =", results$e_pred$auc_round), col = "brown") +
-  annotate("text", x = 0.75, y = 0.30, label = paste("AUC =", results$g_pred$auc_round), col = "red") +
-  annotate("text", x = 0.75, y = 0.25, label = paste("AUC =", results$gd_pred$auc_round), col = "goldenrod") +
-  annotate("text", x = 0.75, y = 0.20, label = paste("AUC =", results$k_pred$auc_round), col = "green") +
-  annotate("text", x = 0.75, y = 0.15, label = paste("AUC =", results$l_nomo$auc_round), col = "cyan") +
-  annotate("text", x = 0.75, y = 0.10, label = paste("AUC =", results$s_nomo$auc_round), col = "blue") +
-  annotate("text", x = 0.75, y = 0.05, label = paste("AUC =", results$w_nomo$auc_round), col = "magenta")
+  annotate("text", x = 0.75, y = 0.45, label = paste("AUC =", results$a_pred$auc_round), col = "black", size = 3) +
+  annotate("text", x = 0.75, y = 0.40, label = paste("AUC =", results$b_pred$auc_round), col = "gray", size = 3) +
+  annotate("text", x = 0.75, y = 0.35, label = paste("AUC =", results$e_pred$auc_round), col = "brown", size = 3) +
+  annotate("text", x = 0.75, y = 0.30, label = paste("AUC =", results$g_pred$auc_round), col = "red", size = 3) +
+  annotate("text", x = 0.75, y = 0.25, label = paste("AUC =", results$gd_pred$auc_round), col = "goldenrod", size = 3) +
+  annotate("text", x = 0.75, y = 0.20, label = paste("AUC =", results$k_pred$auc_round), col = "green", size = 3) +
+  annotate("text", x = 0.75, y = 0.15, label = paste("AUC =", results$l_nomo$auc_round), col = "cyan", size = 3) +
+  annotate("text", x = 0.75, y = 0.10, label = paste("AUC =", results$s_nomo$auc_round), col = "blue", size = 3) +
+  annotate("text", x = 0.75, y = 0.05, label = paste("AUC =", results$w_nomo$auc_round), col = "magenta", size = 3)
 ```
 
 ## Calibration for Any Groin SSI
@@ -1433,7 +1475,7 @@ combined_cal <- rbind(
   data.frame(model = "Gwilym - Deep", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$gd_pred),
   data.frame(model = "Kalish", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$k_nomo),
   data.frame(model = "Leehka", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$l_nomo),
-  data.frame(model = "Souror", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$s_nomo),
+  data.frame(model = "Sorour", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$s_nomo),
   data.frame(model = "Wiseman", grninf = vqi_pad_grninf_preop$grninf, .pred_TRUE = vqi_pad_grninf_preop$w_nomo)
 )
 
@@ -1463,7 +1505,7 @@ combined_cal <- rbind(
   data.frame(model = "Gwilym - Deep", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$gd_pred),
   data.frame(model = "Kalish", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$k_nomo),
   data.frame(model = "Leehka", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$l_nomo),
-  data.frame(model = "Souror", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$s_nomo),
+  data.frame(model = "Sorour", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$s_nomo),
   data.frame(model = "Wiseman", grninf = vqi_pad_grninf_preop$s_grninf, .pred_TRUE = vqi_pad_grninf_preop$w_nomo)
 )
 
@@ -1485,15 +1527,14 @@ filtered_cal %>%
 #  theme(legend.position = "none")
 
 ```
-# Export Data
-
 ```{r export data, echo=FALSE, warning=FALSE, message=FALSE}
 
 vqi_pad_grninf_preop$grninf <- as.logical(vqi_pad_grninf_preop$grninf)
+vqi_pad_grninf_preop$s_grninf <- as.logical(vqi_pad_grninf_preop$s_grninf)
 
 #ff_glimpse(vqi_pad_grninf_preop)
 
-saveRDS(vqi_pad_grninf_preop, file="P:/Pro00113988 - PAD Risk Models/DataRepo/VQI/Analysis Data Files/vqi_pad_grninf_preop.rds")
+saveRDS(vqi_pad_grninf_preop, file="../../DataRepo/VQI/Analysis Data Files/vqi_pad_grninf_preop.rds")
 
 ```
 
