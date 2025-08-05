@@ -3,7 +3,8 @@
 # count_icd9 <- puf_pad_grninf_clean %>% group_by(podiag, podiagtx) %>% summarise(count = n())
 # count_icd10 <- puf_pad_grninf_clean %>% group_by(podiag10, podiagtx10) %>% summarise(count = n())
 
-# Create a vector for the relevant ICD-9 and ICD-10 codes for peripheral arterial disease copied from the CIPHER phenotypes - https://phenomics.va.ornl.gov/web/cipher/phenotype-viewer?uqid=acbc48f5da604934b39561ce6e20a5c7&name=Peripheral_Artery_Disease__ICD_based__MVP_
+# Create a vector for the relevant ICD-9 and ICD-10 codes for peripheral arterial disease 
+# copied from the CIPHER phenotypes - https://phenomics.va.ornl.gov/web/cipher/phenotype-viewer?uqid=acbc48f5da604934b39561ce6e20a5c7&name=Peripheral_Artery_Disease__ICD_based__MVP_
 
 pad_icd9 <- c(250.71, 250.72, 250.73, 440.2, 440.21, 440.22, 440.23, 440.24, 440.29, 440.31, 440.32, 440.4, 440.9, 443.9, 444.22, 444.81, 444.89, 445.02, 447.1, 459.9, 707.1, 707.11, 707.12, 707.13, 707.14, 707.15, 707.19, 785.4)
 pad_icd9 <- as.character(pad_icd9)
@@ -105,3 +106,20 @@ icd_prrevasc <- c("I70.301", "I70.302", "I70.303", "I70.309",
                   "I70.75",
                   "I70.761", "I70.762", "I70.763", "I70.768",
                   "I70.791", "I70.792", "I70.793")
+
+# Codes from "Suzuki H, Vaughan-Sarrazin M, Ohl M, Mecham B, McCoy K, Brennan MB, et al. 
+# Facility-Level Variation in Major Leg Amputation Among Patients With Newly Diagnosed 
+# Diabetic Foot Ulcer. JAMA Netw Open. 2025 Apr 23;8(4):e256781. 
+
+
+icd_dfu <- c("E08.621", "E09.621", "E10.621", "E11.621", "E13.621", "L97.3", "L97.4", "L97.5",
+            "E08", "E09", "E011", "E012", "E013")
+
+icd_osteo <- c("L97.304", "L97.306", "L97.314", "L97.316", "L97.324", "L97.326", "L97.404", 
+               "L97.406", "L97.414", "L97.416", "L97.424", "L97.426", "L97.504", "L97.506", 
+               "L97.514", "L97.516", "L97.524", "L97.526", "M86.17", "M86.27", "M86.37", "M86.47", 
+               "M86.67", "M86.8X7")
+
+icd_gang <- c("E08.52", "E09.52", "E10.52", "E11.52", "E13.52", 
+               "A48.0", "I70.269", "I96", "E08.51", "E09.51", "E10.51", "E11.51", "E13.51")
+

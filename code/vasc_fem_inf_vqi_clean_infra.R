@@ -128,7 +128,7 @@ infra_proc$GENDER <- factor(infra_proc$GENDER, labels = c("Male", "Female", "Oth
 infra_proc$RACE <- factor(infra_proc$RACE, labels = c("American Indian or Alaskan Native","Asian","Black or African American",
                                                       "Native Hawaiian or other Pacific Islander","White","More than 1 race","Unknown / Other"))
 
-infra_proc$PRIMARYINSURER <- factor(infra_proc$PRIMARYINSURER, labels = c("Medicare", "Medicaid", "Commercial", "Military/VA", 
+infra_proc$PRIMARYINSURER <- factor(infra_proc$PRIMARYINSURER, labels = c("Medicare", "Medicaid", "Commercial", "Military.VA", 
                                                                           "Non US insurance", "Self pay", "Medicare Advantage"))
 
 
@@ -188,7 +188,7 @@ infra_proc$COPD <- factor(infra_proc$COPD, labels = c("No", "Not treated", "On m
 
 infra_proc$DIALYSIS <- factor(infra_proc$DIALYSIS, labels = c("No", "Functioning transplant", "On dialysis"))
 
-infra_proc$STRESS <- factor(infra_proc$STRESS, labels = c("Not done", "Normal", "Ischemia", "MI", "Ischemia and MI"))
+infra_proc$STRESS <- factor(infra_proc$STRESS, labels = c("Not done", "Normal", "Ischemia", "Infarction", "Both"))
 
 infra_proc$LIVINGSTATUS <- factor(infra_proc$LIVINGSTATUS, labels = c("Home", "Nursing home", "Homeless"))
 
@@ -201,9 +201,10 @@ infra_proc$ASACLASS <- factor(infra_proc$ASACLASS, labels = c("healthy patient",
 
 ##Medications----
 
-infra_proc$PREOP_ASA <- factor(infra_proc$PREOP_ASA, labels = c("No", "Yes", "No, for medical reason"," Non-compliant"))
+infra_proc$PREOP_ASA <- factor(infra_proc$PREOP_ASA, labels = c("No", "Yes", "No, for medical reason","Non-compliant"))
 
-infra_proc$PREOP_P2Y <- factor(infra_proc$PREOP_P2Y, labels = c("None", "Clopidogrel", "Prasugrel", "Ticlopidine", "Ticagrelor", "Other", "No, for medical reason", "Non-compliant"))
+infra_proc$PREOP_P2Y <- factor(infra_proc$PREOP_P2Y, labels = c("None", "Clopidogrel", "Prasugrel", "Ticlopidine", #retired since 10/31/2022
+                                                                "Ticagrelor", "Other", "No, for medical reason", "Non-compliant"))
 
 infra_proc$PREOP_STATIN <- factor(infra_proc$PREOP_STATIN, labels = c("No", "Yes","No, for medical reason","Non-compliant"))
 

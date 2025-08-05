@@ -3,7 +3,7 @@
 ############################### Proc Data Types ################################
 ##Revised code from Leila Mureebe
 
-infra_ltf <- read_csv("P:/Pro00113988 - PAD Risk Models/DataRepo/VQI/INFRA_International_20231201/INFRA_International_LTF_20231201.csv")
+infra_ltf <- read_csv("../../DataRepo/VQI/INFRA_International_20231201/INFRA_International_LTF_20231201.csv")
 
 numVars <- c('LTF_DAYS')
 

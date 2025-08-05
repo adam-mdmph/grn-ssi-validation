@@ -138,7 +138,7 @@ supra_proc$GENDER <- factor(supra_proc$GENDER, labels = c("Male", "Female", "Oth
 supra_proc$RACE <- factor(supra_proc$RACE, labels = c("American Indian or Alaskan Native","Asian","Black or African American",
                                                       "Native Hawaiian or other Pacific Islander","White","More than 1 race","Unknown / Other"))
 
-supra_proc$PRIMARYINSURER <- factor(supra_proc$PRIMARYINSURER, labels = c("Medicare", "Medicaid", "Commercial", "Military/VA", "Non US insurance", "Self pay", "Medicare Advantage"))
+supra_proc$PRIMARYINSURER <- factor(supra_proc$PRIMARYINSURER, labels = c("Medicare", "Medicaid", "Commercial", "Military.VA", "Non US insurance", "Self pay", "Medicare Advantage"))
                                                                           
 supra_proc$LIVINGSTATUS <- factor(supra_proc$LIVINGSTATUS, labels = c("Home", "Nursing home", "Homeless"))
 
@@ -176,7 +176,7 @@ supra_proc$COPD <- factor(supra_proc$COPD, labels = c("No", "Not treated", "On m
 
 supra_proc$PREOP_DIALYSIS <- factor(supra_proc$PREOP_DIALYSIS, labels = c("No", "Functioning transplant", "On dialysis"))
 
-supra_proc$STRESS <- factor(supra_proc$STRESS, labels = c("Not done", "Normal", "(+)Ischemia", "(+)MI", "(+)Both"))
+supra_proc$STRESS <- factor(supra_proc$STRESS, labels = c("Not done", "Normal", "Ischemia", "Infarction", "Both"))
 
 supra_proc$PREOP_FUNCSTATUS <- factor(supra_proc$PREOP_FUNCSTATUS, labels = c("Full", "Light work", "Self care", "Assisted care", "Bed bound"))
 
@@ -203,7 +203,8 @@ supra_proc$R_PRIOR_MAJOR_AMP <- factor(supra_proc$R_PRIOR_MAJOR_AMP, labels = c(
 #Medications
 supra_proc$PREOP_ASA <- factor(supra_proc$PREOP_ASA, labels = c("No", "Yes", "No, for medical reason", "Non-compliant"))
 
-supra_proc$PREOP_P2Y <- factor(supra_proc$PREOP_P2Y, labels = c("None", "Clopidogrel", "Prasugrel", "Ticlopidine (retired since 10/31/2022)", "Ticagrelor", "Other P2Y12 Inhibitor", "No, for medical reason", "Non-compliant"))
+supra_proc$PREOP_P2Y <- factor(supra_proc$PREOP_P2Y, labels = c("None", "Clopidogrel", "Prasugrel", "Ticlopidine", #retired since 10/31/2022
+                                                                "Ticagrelor", "Other", "No, for medical reason", "Non-compliant"))
 
 supra_proc$PREOP_STATIN <- factor(supra_proc$PREOP_STATIN, labels = c("No", "Yes","No, for medical reason","Non-compliant"))
 

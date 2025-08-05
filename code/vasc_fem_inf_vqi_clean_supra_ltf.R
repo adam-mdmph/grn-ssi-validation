@@ -3,7 +3,7 @@
 ############################### Proc Data Types ################################
 ##Revised code from Leila Mureebe
 
-supra_ltf <- read_csv("P:/Pro00113988 - PAD Risk Models/DataRepo/VQI/SUPRA_International_20231201/SUPRA_International_LTF_20231201.csv")
+supra_ltf <- read_csv("../../DataRepo/VQI/SUPRA_International_20231201/SUPRA_International_LTF_20231201.csv")
 
 supra_ltf <- supra_ltf %>% rename(
   LTF_SSI=LTF_INFECTION
