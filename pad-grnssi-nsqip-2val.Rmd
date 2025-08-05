@@ -1229,12 +1229,6 @@ filtered_cal %>%
   cal_plot_windowed(grninf, .pred_TRUE, .by = model, event_level = "second", step_size = 0.025, include_points = FALSE) +
   facet_wrap(~model) +
   theme(legend.position = "none")
-
-#combined_cal %>%
-#  cal_plot_logistic(grninf, .pred_TRUE, .by = model, event_level = "second", smooth = FALSE) +
-#  facet_wrap(~model) +
-#  theme(legend.position = "none")
-
 ```
 
 ## Calibration for Severe Groin SSI
@@ -1260,12 +1254,6 @@ filtered_cal %>%
   cal_plot_windowed(grninf, .pred_TRUE, .by = model, event_level = "second", step_size = 0.025, include_points = FALSE) +
   facet_wrap(~model) +
   theme(legend.position = "none")
-
-#combined_cal %>%
-#  cal_plot_logistic(grninf, .pred_TRUE, .by = model, event_level = "second", smooth = FALSE) +
-#  facet_wrap(~model) +
-#  theme(legend.position = "none")
-
 ```
 
 # Export data
@@ -1277,4 +1265,5 @@ puf_pad_grninf_preop$grninf <- as.logical(puf_pad_grninf_preop$grninf)
 saveRDS(puf_pad_grninf_preop, file="P:/Pro00113988 - PAD Risk Models/DataRepo/NSQIP/Analysis Data Files/puf_pad_grninf_preop.rds")
 
 ```
+
 
