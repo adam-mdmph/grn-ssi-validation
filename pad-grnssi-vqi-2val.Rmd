@@ -228,40 +228,11 @@ vqi_pad_grninf_preop$grninf <- ifelse(vqi_pad_grninf_preop$grninf_proc == TRUE, 
 
 vqi_pad_grninf_preop$s_grninf <- ifelse(vqi_pad_grninf_preop$s_grninf_proc == TRUE, TRUE, vqi_pad_grninf_preop$s_grninf_ltf)
 
-# Assign the time variable to LOS if SSI occurs inpatient and set to LTF days if occurs as an outpatient.
-#vqi_pad_grninf_preop$time <- ifelse(vqi_pad_grninf_preop$grninf_proc == TRUE, vqi_pad_grninf_preop$POSTOP_LOS, vqi_pad_grninf_preop$LTF_DAYS)
-
-# Create Kaplan Meier Curve
-
-#fit <- survfit(Surv(time = vqi_pad_grninf_preop$time, event = vqi_pad_grninf_preop$grninf) ~ 1, data = vqi_pad_grninf_preop)
-
-#ggsurvplot(fit, data = vqi_pad_grninf_preop,
-#           title = "Groin SSI after Open LER",
-#           xlab = "Time",
-#           ylab = "Survival Probability")
-#summary(fit, times = c(0, 30, 90, 365, 730))
-
 rm(list = c("infra_ltf_grninf", "pad_ltf_grninf", "supra_ltf", "supra_ltf_grninf", "vqi_ltf_grninf",
             "vqi_pad_grninf_preop_proc", "allVars_infra_ltf", "allVars_supra_ltf", "pad_ltf_grninf_surv",
             "pad_ltf_grninf_surv_trim"))
 
 vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("grninf_ltf", "s_grninf_ltf", "grninf_proc", "s_grninf_proc"))]
-
-#vqi_pad_grninf_preop <- vqi_pad_grninf_preop[ , !(names(vqi_pad_grninf_preop) %in% c("POSTOP_SSI", "GRAFTINF", "RTOR", "RTORINF", "WCOMP", #'POSTOP_LOS', 'LTF_DAYS', 'LTF_SSIGRAFT', 'D30_WOUNDCOMP_NECROSIS', 'D30_WOUNDCOMP_HEMATOMA', 'D30_WOUNDCOMP_SEROMA', 'D30_WOUNDCOMP_LYMPH_LEAK', #'D30_WOUNDCOMP_DEHISCENCE', 'D30_WOUNDCOMP_OTHER',            'D30_VASCCOMP_BLEEDING', 'R_D30_GRAFT', 'LTF_SSI','FWP_TIMEPOINT', #'D30_ADMISSION_REASON', 'D30_SSI', 'R_D30_SSI', 'grninf_ltf', 'grninf_surv','grninf_proc'))]
-
-#Select for centers who report more than 10 events
-
-#center_events <- table(vqi_pad_grninf_preop$CENTERID, vqi_pad_grninf_preop$grninf)
-#center_events <- as.data.frame(center_events)
-
-#center_grninf <- center_events %>%
-#  filter(Var2 == TRUE & Freq >= 10)
-
-#centers_grt10 <- center_grninf$Var1
-
-#vqi_pad_grninf_preop <- vqi_pad_grninf_preop %>%
-#  filter(CENTERID %in% centers_grt10)
-
 ```
 
 Table 1: VQI cohort patient demographics.
@@ -1489,12 +1460,6 @@ filtered_cal %>%
   cal_plot_windowed(grninf, .pred_TRUE, .by = model, event_level = "second", step_size = 0.025, include_points = FALSE) +
   facet_wrap(~model) +
   theme(legend.position = "none")
-
-#combined_cal %>%
-#  cal_plot_logistic(grninf, .pred_TRUE, .by = model, event_level = "second", smooth = FALSE) +
-#  facet_wrap(~model) +
-#  theme(legend.position = "none")
-
 ```
 ## Calibration for Severe Groin SSI
 
@@ -1519,13 +1484,7 @@ filtered_cal <- combined_cal %>%
 filtered_cal %>%
   cal_plot_windowed(grninf, .pred_TRUE, .by = model, event_level = "second", step_size = 0.025, include_points = FALSE) +
   facet_wrap(~model) +
-  theme(legend.position = "none")
-
-#combined_cal %>%
-#  cal_plot_logistic(grninf, .pred_TRUE, .by = model, event_level = "second", smooth = FALSE) +
-#  facet_wrap(~model) +
-#  theme(legend.position = "none")
-
+  theme(legend.position = "none"
 ```
 ```{r export data, echo=FALSE, warning=FALSE, message=FALSE}
 
@@ -1537,192 +1496,3 @@ vqi_pad_grninf_preop$s_grninf <- as.logical(vqi_pad_grninf_preop$s_grninf)
 saveRDS(vqi_pad_grninf_preop, file="../../DataRepo/VQI/Analysis Data Files/vqi_pad_grninf_preop.rds")
 
 ```
-
-```{r OLD CODE, eval=FALSE, echo=FALSE}
-g_df <- vqi_pad_grninf_preop[, c(g_exp, "grninf"), drop = FALSE]
-g_df <- g_df[complete.cases(g_df),]
-
-g_beta_coefficients <- c(
-  Intercept = -4.846,
-  female = 0.535,
-  underweight = 0.629,
-  overweight = 0.264,
-  obese = 1.070,
-  heart_dz = 0.793,
-  prep_aq_chlo = -0.394,
-  prep_al_beta = -0.058,
-  prep_aq_beta = 1.024,
-  prep_two_thr = 0.021,
-  vein = 0.884,
-  prsth = 0.938,
-  optime_hrs = 0.142
-)
-
-## Create the model matrix
-g_joined <- paste(g_exp, collapse = " + ")
-g_formula <- as.formula(paste("~", g_joined))
-model_matrix <- model.matrix(g_formula, data = g_df)
-
-## Calculate the linear predictor (g_beta)
-g_beta <- model_matrix %*% g_beta_coefficients
-
-## Calculate the predicted values using the logistic function
-g_df$.pred_TRUE <- 1 / (1 + exp(g_beta))
-
-# Calculate predicted values for Leekha et al
-l_df <- vqi_pad_grninf_preop[, c(l_exp, "grninf"), drop = FALSE]
-l_df <- l_df[complete.cases(l_df),]
-
-l_beta_coefficients <- c(
-  Intercept = 0, #The intercept is unknown so we will use 0
-  clti = 1.07,
-  hxcopd = 0.74,
-  prrevasc_ips = 0.99
-)
-
-## Create the model matrix
-l_joined <- paste(l_exp, collapse = " + ")
-l_formula <- as.formula(paste("~ ", l_joined))
-model_matrix <- model.matrix(l_formula, data = l_df)
-
-## Calculate the linear predictor (l_beta)
-l_beta <- model_matrix %*% l_beta_coefficients
-
-## Calculate the predicted values using the logistic function
-l_df$l_pred <- 1 / (1 + exp(l_beta))
-
-
-b_df <- vqi_pad_grninf_preop[, c(b_exp, "grninf"), drop = FALSE]
-b_df <- b_df[complete.cases(b_df),]
-
-b_beta_coefficients <- c(
-  Intercept = 0, #The intercept is unknown so we will use 0
-  reop_groin = log(3.01),
-  female = log(3.46),
-  BMI = log(1.01),
-  esrd = log(4.37),
-  malnut = log(7.22),
-  urgnt = log(2.98)
-)
-
-## Create the model matrix
-b_joined <- paste(b_exp, collapse = " + ")
-b_formula <- as.formula(paste("~ ", b_joined))
-model_matrix <- model.matrix(b_formula, data = b_df)
-
-## Calculate the linear predictor (b_beta)
-b_beta <- model_matrix %*% b_beta_coefficients
-
-## Calculate the predicted values using the logistic function
-b_df$b_pred <- 1 / (1 + exp(b_beta))
-
-w_df <- vqi_pad_grninf_preop[, c(w_exp, "grninf"), drop = FALSE]
-w_df <- w_df[complete.cases(w_df),]
-
-w_beta_coefficients <- c(
-  Intercept = log(1.2), #All patients have a groin anastomosis so we will include this term as the intercept, even though the intercept is not known
-  female = log(1.4),
-  age65 = log(0.9),
-  blkrace = log(0.8),
-  othrace = log(0.9),
-  overweight = log(1.3),
-  obese = log(2.3),
-  underweight = log(1.3),
-  dm_ins = log(1.3),
-  dm_nonins = log(1.2),
-  smoke = log(1.2),
-  hypermed = log(1.2),
-  heart_dz = log(1.1),
-  clti = log(1.2),
-  fnst_par = log(1.1),
-  fnst_dep = log(0.5),
-  hxcopd = log(1.1),
-  neuro = log(1.1),
-  optime46h = log(1.4),
-  optime6h = log(1.5),
-  proc_ai = log(2.4),
-  proc_ler = log(3.1),
-  vein = log(0.9),
-  prsth = log(0.8),
-  asa_class_3 = log(1.1),
-  asa_class_45 = log(1.2)
-)
-
-## Create the model matrix
-w_joined <- paste(w_exp, collapse = " + ")
-w_formula <- as.formula(paste("~ ", w_joined))
-model_matrix <- model.matrix(w_formula, data = w_df)
-
-## Calculate the linear predictor (b_beta)
-w_beta <- model_matrix %*% w_beta_coefficients
-
-## Calculate the predicted values using the logistic function
-w_df$w_pred <- 1 / (1 + exp(w_beta))
-
-l_df$grninf <- as.logical(l_df$grninf)
-l_df$grninf <- as.numeric(l_df$grninf)
-calibration_plot(data = l_df, obs = "grninf", pred = "l_pred", title = "Calibration plot for Leekha et al", y_lim = c(0, 1), x_lim=c(0, 1))
-
-b_df$grninf <- as.logical(b_df$grninf)
-b_df$grninf <- as.numeric(b_df$grninf)
-calibration_plot(data = b_df, obs = "grninf", pred = "b_pred", title = "Calibration plot for Bennett et al", y_lim = c(0, 0.7), x_lim=c(0, 0.7))
-
-w_df$grninf <- as.logical(w_df$grninf)
-w_df$grninf <- as.numeric(w_df$grninf)
-calibration_plot(data = w_df, obs = "grninf", pred = "w_pred", title = "Calibration plot for Wiseman et al", y_lim = c(0, 1), x_lim=c(0, 1))
-
-#General ROC curves - replaced with a loop
-roc_g <- roc_curve(vqi_pad_grninf_preop, grninf, g_pred)
-auc_g <- roc_auc(vqi_pad_grninf_preop, grninf, g_pred)
-auc_g_round <- round(auc_g$.estimate, 2)
-
-roc_gd <- roc_curve(vqi_pad_grninf_preop, grninf, gd_pred)
-auc_gd <- roc_auc(vqi_pad_grninf_preop, grninf, gd_pred)
-auc_gd_round <- round(auc_gd$.estimate, 2)
-
-roc_l <- roc_curve(vqi_pad_grninf_preop, grninf, l_pred)
-auc_l <- roc_auc(vqi_pad_grninf_preop, grninf, l_pred)
-auc_l_round <- round(auc_l$.estimate, 2)
-
-roc_ln <- roc_curve(vqi_pad_grninf_preop, grninf, l_nomo)
-auc_ln <- roc_auc(vqi_pad_grninf_preop, grninf, l_nomo)
-auc_ln_round <- round(auc_ln$.estimate, 2)
-
-roc_b <- roc_curve(vqi_pad_grninf_preop, grninf, b_pred)
-auc_b <- roc_auc(vqi_pad_grninf_preop, grninf, b_pred)
-auc_b_round <- round(auc_b$.estimate, 2)
-
-roc_w <- roc_curve(vqi_pad_grninf_preop, grninf, w_pred)
-auc_w <- roc_auc(vqi_pad_grninf_preop, grninf, w_pred)
-auc_w_round <- round(auc_w$.estimate, 2)
-
-roc_wn <- roc_curve(vqi_pad_grninf_preop, grninf, w_nomo)
-auc_wn <- roc_auc(vqi_pad_grninf_preop, grninf, w_nomo)
-auc_wn_round <- round(auc_wn$.estimate, 2)
-
-#w_df <- vqi_pad_grninf_preop[, c(w_exp, "grninf", "w_score", "w_nomo"), drop = FALSE]
-#w_df <- w_df[complete.cases(w_df),]
-#w_df$w_score <- as.numeric(w_df$w_score)
-
-#summary(w_df$w_score)
-
-#event_rate <- w_df %>%
-#  group_by(w_score) %>%
-#  summarise(rate = mean(grninf, na.rm = TRUE))
-
-#exp <- c("w_score")
-
-#w_df %>%
-#  summary_factorlist(dependent, exp, p=TRUE, add_dependent_label=TRUE,
-#                     add_col_totals = TRUE, column = FALSE,
-#                     include_col_totals_percent = FALSE,
-#                     col_totals_rowname = "",
-#                     col_totals_prefix = "N=") -> w_t2
-#knitr::kable(w_t2, align = c("l", "l", "r", "r", "r"))
-
-#print(event_rate)
-#roc <- roc_curve(w_df, grninf, w_score)
-#autoplot(roc)
-
-```
-
