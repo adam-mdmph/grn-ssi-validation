@@ -1,0 +1,136 @@
+---
+title: PAD and Open LER Select from VQI Data set
+author: Hana Shafique and Adam Johnson
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  word_document:
+knit: (function(input, ...) {rmarkdown::render(input, output_file = paste0(tools::file_path_sans_ext(basename(input)), '-', Sys.Date(), '.docx'))})
+---
+
+# Purpose Statement:
+
+This project aims to develop and validate a risk model for wound infections. This analysis describes the validation of previously published risk models for wound infection in the NSQIP procedure targeted data sets.
+
+# Data:
+
+VQI PUF Files, inclusive of the aortoiliac open and lower extremity open procedure targeted data sets, from 2013-2020 were queried for this study. We utilized the NSQIPR package to clean the data and organize into relational data sets. We will use the following packages to analyze the data.
+
+```{r packages, message=FALSE, warning=FALSE, results='hide'}
+library(tidyverse)
+library(finalfit)
+```
+
+We will import the data for the infra and supra data sets, align variable types and names and merge these data sets.  We will then select revascularization procedures with a groin incision and an indication of PAD.
+
+```{r import, clean, merge, and select datasets, message=FALSE, warning=FALSE, results='hide', echo=FALSE}
+
+# Import infra and supra data sets, clean data set, assign a variable to mark each data set, then bind the data sets together
+
+infra_proc <- read_csv("../../DataRepo/VQI/INFRA_International_20231201/INFRA_International_PROC_20231201.csv")
+source("code/vasc_fem_inf_vqi_clean_infra.R")
+infra_proc$proc_ler <- TRUE
+
+supra_proc <- read_csv("../../DataRepo/VQI/SUPRA_International_20231201/SUPRA_International_PROC_20231201.csv")
+source("code/vasc_fem_inf_vqi_clean_supra.R")
+supra_proc$proc_ai <- TRUE
+
+pad_proc <- bind_rows(infra_proc,supra_proc)
+pad_proc$proc_ler <- replace(pad_proc$proc_ler, is.na(pad_proc$proc_ler), FALSE)
+pad_proc$proc_ai <- replace(pad_proc$proc_ai, is.na(pad_proc$proc_ai), FALSE)
+
+rm(list = c("infra_proc", "supra_proc"))
+
+# Create variables for indication and procedure, which will be used to select cases.
+
+pad_proc <- pad_proc %>%
+  mutate(
+    right_side = SIDE == "Right" | GRFT_RECP1_SIDE == "Right" | GRFT_RECP2_SIDE == "Right",
+    left_side = SIDE == "Left" | GRFT_RECP1_SIDE == "Left" | GRFT_RECP2_SIDE == "Left",
+    claudication_right = right_side & (R_INDICATIONR == "Claudication" | 
+                                       INDICATION_OCCLUSIVE_R %in% c("Mild Claudication", "Moderate Claudication", "Severe Claudication")),
+    claudication_left = left_side & 
+      (R_INDICATIONL == "Claudication" | 
+         INDICATION_OCCLUSIVE_L %in% c("Mild Claudication", "Moderate Claudication", "Severe Claudication")),
+    rest_pain_right = right_side & (R_INDICATIONR == "Rest Pain" | INDICATION_OCCLUSIVE_R == "Rest Pain"),
+    rest_pain_left = left_side & (R_INDICATIONL == "Rest Pain" | INDICATION_OCCLUSIVE_L == "Rest Pain"),
+    tissue_loss_right = right_side & 
+      (R_INDICATIONR == "Tissue Loss" | 
+         INDICATION_OCCLUSIVE_R %in% c("Ulcer/necrosis", "Non-healing amputation", 
+                                       "Both ulcer and non-healing amp")),
+    tissue_loss_left = left_side & 
+      (R_INDICATIONL == "Tissue Loss" | 
+         INDICATION_OCCLUSIVE_L %in% c("Ulcer/necrosis", "Non-healing amputation", 
+                                       "Both ulcer and non-healing amp")),
+    acute_ischemia_right = right_side & (R_INDICATIONR == "Acute Ischemia" |
+                                         INDICATION_OCCLUSIVE_R == "Acute Ischemia" |
+                                         ACUTE_ISCHEMIA_R %in% c("Viable", "Marginally threatened", "Immediately Threatened", 
+                                                                 "Irreversible (nonviable)", "Immediately threatened")),
+    acute_ischemia_left = left_side & (R_INDICATIONL == "Acute Ischemia" |
+                                       INDICATION_OCCLUSIVE_L == "Acute Ischemia" |
+                                       ACUTE_ISCHEMIA_L %in% c("Viable", "Marginally threatened", "Immediately Threatened", 
+                                                               "Irreversible (nonviable)", "Immediately threatened"))
+  )
+
+pad_proc <- pad_proc %>%
+  mutate(indication = case_when(
+    claudication_right == TRUE | claudication_left == TRUE ~ "Claudication",
+    rest_pain_right == TRUE | rest_pain_left == TRUE ~ "Rest Pain",
+    tissue_loss_right == TRUE | tissue_loss_left == TRUE ~ "Tissue Loss",
+    acute_ischemia_right == TRUE | acute_ischemia_left == TRUE ~ "Acute Limb Ischemia",
+    TRUE ~ "Other"
+  ))
+pad_proc$indication <- factor(pad_proc$indication, 
+                                          levels = c("Claudication", "Rest Pain", "Tissue Loss", 
+                                                     "Acute Limb Ischemia", "Other"))
+
+pad_proc <- pad_proc %>%
+  mutate(
+    aorto_ilio_orig = GRFT_ORIGIN_ARTERY %in% c("Thoracic Aorta", "Abdominal Aorta, end-side", "Abdominal Aorta, end-end", 
+                                                "Com iliac", "Ext iliac"),
+    ax_orig = GRFT_ORIGIN_ARTERY == "Axillary",
+    fem_orig_supra = GRFT_ORIGIN_ARTERY %in% c("Com Fem", "Profunda", "SFA"),
+    fem_orig_infra = GRAFTORIG %in% c("Ext Iliac", "Com Fem", "Profunda", "SFA"),
+    fem_recip_supra = GRFT_RECP1_ARTERY %in% c("Com Fem", "Profunda", "SFA"),
+    fem_recip_infra = GRAFTRECIP %in% c("Com Fem", "Profunda", "SFA"),
+    pop_recip = GRAFTRECIP %in% c("AK Pop", "BK Pop", "T-P Trunk"),
+    tib_recip = GRAFTRECIP %in% c("AT", "PT", "Peroneal", "DP Ankle", "PT Ankle", "Tarsal/plantar")
+  )
+
+pad_proc <- pad_proc %>%
+  mutate(proc = case_when(
+    aorto_ilio_orig == TRUE & fem_recip_supra == TRUE ~ "Aorto or Iliofemoral Bypass",
+    ax_orig == TRUE & fem_recip_supra == TRUE ~ "Axillofemoral Bypass", 
+    fem_orig_supra == TRUE & fem_recip_supra == TRUE ~ "Fem Fem Bypass", #infers that procedures in SUPRA with fem origin and fem recipient are fem-fem bypass
+    fem_orig_infra == TRUE & fem_recip_infra == TRUE ~ "Femoral Revasc", #infers that procedures in INFRA with fem origin and fem recipient are ipsilateral revasc
+    fem_orig_infra == TRUE & pop_recip == TRUE ~ "Fem Pop Bypass",
+    fem_orig_infra == TRUE & tib_recip == TRUE ~ "Fem Tib Bypass",
+    TRUE ~ "Other"
+  ))
+pad_proc$proc <- factor(pad_proc$proc, 
+                                    levels = c("Aorto or Iliofemoral Bypass", "Axillofemoral Bypass", 
+                                               "Fem Fem Bypass",
+                                               "Femoral Revasc", "Fem Pop Bypass", "Fem Tib Bypass", "Other"))
+
+pad_proc <- pad_proc %>%
+  mutate(fem_exposure = fem_orig_supra == TRUE | fem_orig_infra == TRUE | fem_recip_supra == TRUE | fem_recip_infra == TRUE)
+
+# Select for cases in patients >18 years, after 2010, with a femoral exposure and indication for PAD
+
+vqi_pad <- pad_proc %>%
+  filter(
+    AGE > 18,
+    SURGYEAR %in% c("2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020", "2021", "2022", "2023"),
+    fem_exposure == TRUE,
+    indication %in% c("Claudication", "Rest Pain", "Tissue Loss", "Acute Limb Ischemia")
+  )
+
+rm(list = "pad_proc")
+
+```
+
+#Export Data
+
+```{r export, message=FALSE, warning=FALSE, echo=FALSE}
+
+saveRDS(vqi_pad, file="../../DataRepo/VQI/Analysis Data Files/vqi_pad.rds")
+```

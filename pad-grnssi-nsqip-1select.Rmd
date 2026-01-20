@@ -1,0 +1,109 @@
+---
+title: Risk Model Validation and Refinement for wound infection after revascularization
+  for PAD
+author: Eden Singh and Adam Johnson
+output:
+  word_document: default
+  html_notebook: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+# Purpose Statement:
+
+This project aims to develop and validate a risk model for wound infections. This analysis describes the validation of previously published risk models for wound infection in the NSQIP procedure targeted data sets.
+
+# Data:
+
+NSQIP Participant Use Files (PUF), inclusive of the aortoiliac open and lower extremity open procedure targeted data sets, from 2013-2020 were queried for this study. We utilized the NSQIPR package to clean the data and organize into relational data sets. The tidyverse, tidymodels, and finalfit packages were then used to analyze the data.
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+library(tidyverse)
+library(finalfit)
+```
+
+We have selected the following CPT codes to identify the procedures that involved an open groin incision:
+
+| Procedure Category                | CPT Codes                                                      |
+|-----------------------------------|----------------------------------------------------------------|
+| Aortofemoral                      | 35539, 35540, 355546, 35548, 35551, 35582, 35646, 35647, 35651 |
+| Iliofemoral                       | 35565, 35665                                                   |
+| Axillary-femoral                  | 35521, 35533, 35621, 35654                                     |
+| Fem-fem                           | 34520, 35558, 35661                                            |
+| Embolectomy                       | 34201                                                          |
+| CFEA                              | 35355, 35363, 35371, 35372, 35381                              |
+| Femoral Aneurysm                  | 35131, 35132, 35721                                            |
+| Fem-popliteal bypass              | 35556, 35583, 35656                                            |
+| Fem-tibial                        | 35566, 35585, 35666                                            |
+| Redo fem-pop or fem-tibial bypass | 35700, 35883, 35884                                            |
+
+```{r identify cpt, echo=FALSE, warning=FALSE}
+# Select cases from NSQIP Data with CPTs of procedures that include a groin incision
+
+# Create a vector with years of relevant data sets.
+years <- c("13", "14", "15_v2", "16", "17", "18_v2", "19", "20")
+
+# Create a vector with relevant CPTs of interest
+## Create CPT groups
+source("code/vasc_fem_inf_cpt_groups.R")
+
+## Create ICD Groups
+source("code/vasc_fem_inf_icd_groups.R")
+
+#cat(paste(icd_prrevasc, collapse = ", "))
+```
+
+```{r import cleaned data, select and merge, echo=FALSE}
+
+# Run source code to select relevant cases based on PRIMARY CPT from PUF files across the years of interest
+source("code/vasc_fem_inf_select_bind.R")
+
+# Combine relevant procedure targeted data sets
+source("code/combine_tar.R")
+
+# Combine puf files and procedure targeted files, keep all cases regardless of whether they have procedure targeted data
+
+puf_pad <- merge(combined_data, combined_pad, by = "caseid", all.x = TRUE)
+
+# Select for cases with PAD icd9 or icd10 diagnoses
+
+puf_pad <- puf_pad[puf_pad$podiag %in% pad_icd9 | puf_pad$podiag10 %in% pad_icd10, ]
+puf_pad <- droplevels(puf_pad)
+
+# remove unneeded objects
+rm(combined_data, combined_pad)
+```
+
+```{r prep, echo=FALSE, warning=FALSE}
+
+# Fix variable classes
+
+puf_pad <- puf_pad %>% mutate_at(vars(age, height, weight), as.numeric)
+
+puf_pad <- puf_pad %>% 
+  mutate_at(vars(race, ethnicity_hispanic, wndclas, asaclas, cpt, podiag, podiagtx, podiag10, 
+                 podiagtx10, podiag_other10, othcdiff, proc),
+            as.factor)
+
+# Null Impute missing variables
+
+puf_pad$race <- fct_explicit_na(puf_pad$race, na_level = "Unknown")
+puf_pad$ethnicity_hispanic <- fct_explicit_na(puf_pad$ethnicity_hispanic, na_level = "Unknown")
+puf_pad$othcdiff <- fct_explicit_na(puf_pad$othcdiff, na_level = "Unknown")
+puf_pad$wound_closure <- fct_explicit_na(puf_pad$wound_closure, na_level = "Unknown")
+
+# Remove variables with all missing values
+
+missing_percent <- colSums(is.na(puf_pad)) / nrow(puf_pad) * 100
+more99miss_variables <- names(missing_percent[missing_percent > 99])
+puf_pad <- puf_pad[ , !(names(puf_pad) %in% more99miss_variables)]
+```
+
+# Export data
+
+```{r export, echo=FALSE, warning=FALSE}
+#save as RDS file to use in other analyses
+
+saveRDS(puf_pad, file="P:/Pro00113988 - PAD Risk Models/DataRepo/NSQIP/Analysis Data Files/puf_pad.rds")
+```

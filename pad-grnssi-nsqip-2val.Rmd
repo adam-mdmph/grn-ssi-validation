@@ -1,0 +1,1118 @@
+---
+title: Risk Model Validation and Refinement for wound infection after revascularization
+  for PAD
+author: Eden Singh and Adam Johnson
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  word_document:
+knit: (function(input, ...) {rmarkdown::render(input, output_file = paste0(tools::file_path_sans_ext(basename(input)), '-', Sys.Date(), '.docx'), output_dir = "reports")})
+---
+# Purpose Statement:
+
+This project aims to develop and validate a risk model for wound infections. This analysis describes the validation of previously published risk models for wound infection in the NSQIP procedure targeted data sets.
+
+# Data:
+
+NSQIP Participant Use Files (PUF), inclusive of the aortoiliac open and lower extremity open procedure targeted data sets, from 2013-2020 were queried for this study. We utilized the NSQIPR package to clean the data and organize into relational data sets. The tidyverse, tidymodels, and finalfit packages were then used to analyze the data.
+
+```{r packages, echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+library(tidyverse)
+library(finalfit)
+library(tidymodels)
+library(probably)
+library(pROC)
+library(survival)
+library(survminer)
+library(predtools)
+library(magrittr)
+library(Hmisc)
+library(labelled)
+library(renv)
+library(boot)
+library(parallel)
+
+#Create functions
+source("code/functions.R")
+
+#utils::sessionInfo()
+```
+
+We import data that was selected from the PUF files with the following CPT codes to identify the procedures that involved an open groin incision:
+
+| Procedure Category                | CPT Codes                                                      |
+|-----------------------------------|----------------------------------------------------------------|
+| Aortofemoral                      | 35539, 35540, 355546, 35548, 35551, 35582, 35646, 35647, 35651 |
+| Iliofemoral                       | 35565, 35665                                                   |
+| Axillary-femoral                  | 35521, 35533, 35621, 35654                                     |
+| Fem-fem                           | 34520, 35558, 35661                                            |
+| Embolectomy                       | 34201                                                          |
+| CFEA                              | 35355, 35363, 35371, 35372, 35381                              |
+| Femoral Aneurysm                  | 35131, 35132, 35721                                            |
+| Fem-popliteal bypass              | 35556, 35583, 35656                                            |
+| Fem-tibial                        | 35566, 35585, 35666                                            |
+| Redo fem-pop or fem-tibial bypass | 35700, 35883, 35884                                            |
+
+```{r import dat, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Import data created using "vasc-fem-inf-nsqip-select.rmd"
+
+puf_pad_grninf_clean <- readRDS("P:/Pro00113988 - PAD Risk Models/DataRepo/NSQIP/Analysis Data Files/puf_pad.rds")
+
+colnames(puf_pad_grninf_clean)
+summary(puf_pad_grninf_clean$emergncy)
+
+```
+
+
+# Variable Definitions
+
+```{r prep var, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Select for relevant preop variables
+
+grninf_preop_var <- c("caseid",
+                     "supinfec", "wndinfd","orgspcssi", 
+                     "operyr", "transt", "sex", "race", "ethnicity_hispanic",
+                     "age", "weight", "height",
+                     "pad_sympt", "pad_hrf_anat",
+                     "anesthes", "surgspec", "emergncy", 
+                     "optime", "cpt", "podiag", "podiagtx", "podiag10", "podiagtx10",
+                     "wndclas", "asaclas",
+                     "hypermed", "hxchf", "insulin", "smoke", "fnstatus2", "hxcopd", "ascites",
+                     "renafail", "dialysis", "discancr", "wndinf", "steroid",
+                     "wtloss", "bleeddis", "when_dyspnea", "type_prsepis",
+                     "prsodm", "prbun", "prcreat", "prbun", "prwbc", "prhct", "prplate", "pralbum"
+                     )
+
+puf_pad_grninf_preop <- puf_pad_grninf_clean[, grninf_preop_var, drop = FALSE]
+
+rm(list = c("puf_pad_grninf_clean", "grninf_preop_var"))
+
+## Label Variables
+
+label(puf_pad_grninf_preop$operyr) <- "Year"
+label(puf_pad_grninf_preop$sex) <- "Sex"
+label(puf_pad_grninf_preop$race) <- "Race"
+label(puf_pad_grninf_preop$age) <- "Age (Years)"
+
+# select variable names that start with pad
+
+#col_names <- colnames(puf_pad_grninf_clean)
+#pad_variables <- col_names[grep("^pad", col_names)]
+
+```
+
+```{r address missing, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Add unknown variable for procedure specific variables
+
+levels(puf_pad_grninf_preop$pad_sympt) <- c(levels(puf_pad_grninf_preop$pad_sympt), 'Unknown')
+puf_pad_grninf_preop$pad_sympt[is.na(puf_pad_grninf_preop$pad_sympt)] <- 'Unknown'
+
+levels(puf_pad_grninf_preop$pad_hrf_anat) <- c(levels(puf_pad_grninf_preop$pad_hrf_anat), 'Unknown')
+puf_pad_grninf_preop$pad_hrf_anat[is.na(puf_pad_grninf_preop$pad_hrf_anat)] <- 'Unknown'
+
+# Combine ICD variable
+
+# Ensure 'podiag' and 'podiag10' are characters
+puf_pad_grninf_preop$podiag <- as.character(puf_pad_grninf_preop$podiag)
+puf_pad_grninf_preop$podiag10 <- as.character(puf_pad_grninf_preop$podiag10)
+
+# Create a new variable that combines 'podiag' and 'podiag10'
+puf_pad_grninf_preop$podiag_combined <- ifelse(is.na(puf_pad_grninf_preop$podiag) | puf_pad_grninf_preop$podiag == "", puf_pad_grninf_preop$podiag10, puf_pad_grninf_preop$podiag)
+
+# Convert pod_combine back to factor and remove other variables.
+puf_pad_grninf_preop$podiag_combined <- as.factor(puf_pad_grninf_preop$podiag_combined)
+
+puf_pad_grninf_preop <- puf_pad_grninf_preop[ , !(names(puf_pad_grninf_preop) %in% c("podiag", "podiag10"))]
+
+# Ensure 'podiagtx' and 'podiagtx10' are characters
+puf_pad_grninf_preop$podiagtx <- as.character(puf_pad_grninf_preop$podiagtx)
+puf_pad_grninf_preop$podiagtx10 <- as.character(puf_pad_grninf_preop$podiagtx10)
+
+# Create a new variable that combines 'podiag' and 'podiag10'
+puf_pad_grninf_preop$podiagtx_combined <- ifelse(is.na(puf_pad_grninf_preop$podiagtx) | puf_pad_grninf_preop$podiagtx == "", puf_pad_grninf_preop$podiagtx10, puf_pad_grninf_preop$podiagtx)
+
+# Convert pod_combine back to factor and remove other variables.
+puf_pad_grninf_preop$podiagtx_combined <- as.factor(puf_pad_grninf_preop$podiagtx_combined)
+
+puf_pad_grninf_preop <- puf_pad_grninf_preop[ , !(names(puf_pad_grninf_preop) %in% c("podiagtx", "podiagtx10"))]
+
+# Add 'None' value to stratified comorbidity variables
+
+puf_pad_grninf_preop$dm_insulin <- ifelse(puf_pad_grninf_preop$insulin == TRUE, 'Insulin', 
+             ifelse(puf_pad_grninf_preop$insulin == FALSE, 'Meds or Diet', 'None'))
+levels(puf_pad_grninf_preop$dm_insulin) <- c(levels(puf_pad_grninf_preop$dm_insulin), 'None')
+puf_pad_grninf_preop$dm_insulin[is.na(puf_pad_grninf_preop$dm_insulin)] <- 'None'
+puf_pad_grninf_preop$dm_insulin <- as.factor(puf_pad_grninf_preop$dm_insulin)
+
+puf_pad_grninf_preop <- puf_pad_grninf_preop[ , !(names(puf_pad_grninf_preop) %in% c("insulin"))]
+
+levels(puf_pad_grninf_preop$when_dyspnea) <- c(levels(puf_pad_grninf_preop$when_dyspnea), 'None')
+puf_pad_grninf_preop$when_dyspnea[is.na(puf_pad_grninf_preop$when_dyspnea)] <- 'None'
+
+levels(puf_pad_grninf_preop$type_prsepis) <- c(levels(puf_pad_grninf_preop$type_prsepis), 'None')
+puf_pad_grninf_preop$type_prsepis[is.na(puf_pad_grninf_preop$type_prsepis)] <- 'None'
+
+# Keep only cases with no missing variables
+
+#puf_pad_grninf_preop <- na.omit(puf_pad_grninf_preop)
+#puf_pad_grninf_preop <- droplevels(puf_pad_grninf_preop)
+
+```
+
+
+The outcome of interest for our study is the development of a superifical incisional, deep incisional or organ space wound infection in these procedures that include a groin incision in the 30d post operative period. NSQIP defines infection as superifical, deep space or organ space.
+
+```{r create outcome, echo=FALSE, warning=FALSE, message=FALSE}
+
+puf_pad_grninf_preop <- puf_pad_grninf_preop %>%
+  mutate(grninf = supinfec | wndinfd | orgspcssi)
+label(puf_pad_grninf_preop$grninf) <- "Any Groin SSI"
+
+puf_pad_grninf_preop <- puf_pad_grninf_preop %>%
+  mutate(s_grninf = wndinfd | orgspcssi)
+label(puf_pad_grninf_preop$grninf) <- "Severe Groin SSI"
+
+
+puf_pad_grninf_preop <- puf_pad_grninf_preop[ , !(names(puf_pad_grninf_preop) %in% c("supinfec", "wndinfd","orgspcssi"))]
+
+```
+
+
+```{r table 1, warning=FALSE, echo=FALSE, message=FALSE}
+
+##Create table one with cohort descriptive statistics for age, gender, race, year, indication and procedure.
+
+## Truncate year
+puf_pad_grninf_preop$operyr_trunc <- substr(puf_pad_grninf_preop$operyr, 1, 4)
+puf_pad_grninf_preop$operyr_trunc <- as.factor(puf_pad_grninf_preop$operyr_trunc)
+puf_pad_grninf_preop <- puf_pad_grninf_preop[ , !(names(puf_pad_grninf_preop) %in% c("operyr"))]
+label(puf_pad_grninf_preop$operyr_trunc) <- "Operative Year"
+
+## Create variables for indications
+source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem_inf_icd_groups.R")
+
+puf_pad_grninf_preop <- puf_pad_grninf_preop %>%
+  mutate(indication = case_when(
+    puf_pad_grninf_preop$pad_sympt == "Claudication" |
+      puf_pad_grninf_preop$podiag_combined %in% icd_claudication ~ "Claudication",
+    puf_pad_grninf_preop$pad_sympt == "Rest pain" |
+      puf_pad_grninf_preop$podiag_combined %in% icd_rest_pain ~ "Rest Pain",
+    puf_pad_grninf_preop$pad_sympt == "Tissue loss" |
+      puf_pad_grninf_preop$podiag_combined %in% icd_tissue == TRUE ~ "Tissue Loss",
+    puf_pad_grninf_preop$podiag_combined %in% icd_embo == TRUE ~ "Acute Limb Ischemia",
+    TRUE ~ "Unspecified"
+  ))
+puf_pad_grninf_preop$indication <- factor(puf_pad_grninf_preop$indication, 
+                                          levels = c("Claudication", "Rest Pain", "Tissue Loss", 
+                                                     "Acute Limb Ischemia", "Unspecified"))
+label(puf_pad_grninf_preop$indication) <- "Indication"
+
+summary(puf_pad_grninf_preop$indication)
+
+# Create variables for other procedure classes based on CPT
+source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem_inf_cpt_groups.R")
+
+## Create variable for aortofem
+
+puf_pad_grninf_preop <- puf_pad_grninf_preop %>%
+  mutate(proc = case_when(
+    puf_pad_grninf_preop$cpt %in% cpt_aortofem |
+      puf_pad_grninf_preop$cpt %in% cpt_iliofem ~ "Aorto or Iliofemoral Bypass",
+    puf_pad_grninf_preop$cpt %in% cpt_axfem ~ "Axillofemoral Bypass", 
+    puf_pad_grninf_preop$cpt %in% cpt_femfem ~ "Fem Fem Bypass",
+    puf_pad_grninf_preop$cpt %in% cpt_cfea == TRUE |
+      puf_pad_grninf_preop$cpt %in% cpt_femaneur ~ "Femoral Revasc", 
+    puf_pad_grninf_preop$cpt %in% cpt_fempop ~ "Fem Pop Bypass",
+    puf_pad_grninf_preop$cpt %in% cpt_femtib ~ "Fem Tib Bypass",
+    TRUE ~ "Other"
+  ))
+puf_pad_grninf_preop$proc <- factor(puf_pad_grninf_preop$proc, 
+                                    levels = c("Aorto or Iliofemoral Bypass", "Axillofemoral Bypass", "Fem Fem Bypass",
+                                               "Femoral Revasc", "Fem Pop Bypass", "Fem Tib Bypass", "Other"))
+label(puf_pad_grninf_preop$proc) <- "Procedure"
+
+t1_exp <- c("age", "sex", "race", "indication", "proc")
+dep_1 <- "grninf"
+dep_2 <- "s_grninf"
+puf_pad_grninf_preop %>%
+  summary_factorlist(dep_1, t1_exp,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t1_1
+
+t1_1 <- t1_1 %>%
+  select(1, 2, 4, 5) %>%
+  rename("Any Groin SSI" = "TRUE")
+
+puf_pad_grninf_preop %>%
+  summary_factorlist(dep_2, t1_exp,
+                     add_col_totals = TRUE,
+                     include_col_totals_percent = FALSE,
+                     col_totals_rowname = "",
+                     col_totals_prefix = "N=",
+                     total_col = TRUE) -> t1_2
+
+t1_2 <- t1_2 %>%
+  select(4) %>%
+  rename("Severe Groin SSI" = "TRUE")
+
+t1 <- t1_1 %>%
+  bind_cols(t1_2) %>%
+  select(1, 2, 3, 5, 4)
+
+knitr::kable(t1, align = c("l", "l", "r", "r", "r"))
+```
+
+
+We then mapped the pre-operative variables in the NSQIP data dictionary to those features described in in the previously published wound infection models. Decisions related to variable mapping are included in the code notes.
+
+# Variable Mapping
+
+## Demographics
+
+```{r Demographics, echo=FALSE, warning=FALSE, message=FALSE}
+
+#Create an object for current column names
+column_names_no_demo <- colnames(puf_pad_grninf_preop)
+
+# Age, dichotomized in different models - Wiseman, Kalish, Xu
+
+  #Create variable for age greater than 65. - Wiseman
+  puf_pad_grninf_preop$age65 <- ifelse(puf_pad_grninf_preop$age > "65", TRUE, FALSE)
+  label(puf_pad_grninf_preop$age65) <- "Age >65"
+
+  ## Xu dichotomizes age at 73
+  puf_pad_grninf_preop$age73 <- ifelse(puf_pad_grninf_preop$age > "73", TRUE, FALSE)
+  label(puf_pad_grninf_preop$age73) <- "Age >73"
+
+# Sex, female - Xu, Bennett, Wiseman, Gwilym - Deep
+
+  puf_pad_grninf_preop$female <- ifelse(puf_pad_grninf_preop$sex == "Female", TRUE, FALSE)
+  label(puf_pad_grninf_preop$female) <- "Female Sex"
+
+# Race Ethnicity - Wiseman, Xu
+
+  ## Xu utilizes non-hispanic white as a variable, NSQIP does not capture ethnicity so it is not   known whether patients are    hispanic or not
+  puf_pad_grninf_preop$whtrace <- ifelse(puf_pad_grninf_preop$race == "White" &
+                                           puf_pad_grninf_preop$ethnicity_hispanic == FALSE, TRUE, FALSE)
+  label(puf_pad_grninf_preop$whtrace) <- "Non-Hispanic White"
+  
+summary(puf_pad_grninf_preop$ethnicity_hispanic) 
+  
+  #Create Black race variable from on race variable in NSQIP. - Wiseman
+  puf_pad_grninf_preop$blkrace <- ifelse(puf_pad_grninf_preop$race == "Black", TRUE, FALSE)
+  label(puf_pad_grninf_preop$blkrace) <- "Black or African American"
+  puf_pad_grninf_preop$othrace <- ifelse(puf_pad_grninf_preop$race == "American Indian or Alaska native" |
+                                         puf_pad_grninf_preop$race == "Some other race" |
+                                         puf_pad_grninf_preop$race == "Asian" |
+                                         puf_pad_grninf_preop$race == "Native Hawaiian or Pacific islander" |
+                                         puf_pad_grninf_preop$race == "Unknown", TRUE, FALSE)
+  label(puf_pad_grninf_preop$othrace) <- "Other Race"
+
+  summary(puf_pad_grninf_preop$othrace)
+  
+# BMI/Obesity - Xu, Sorour, Bennett, Kalish, Wiseman
+
+  puf_pad_grninf_preop$BMI <- 703*(puf_pad_grninf_preop$weight/(puf_pad_grninf_preop$height^2))
+
+  puf_pad_grninf_preop$underweight <- ifelse(puf_pad_grninf_preop$BMI < "18.5", TRUE, FALSE)
+  puf_pad_grninf_preop$underweight <- ifelse(is.na(puf_pad_grninf_preop$underweight), 
+                                         FALSE, puf_pad_grninf_preop$underweight)
+  label(puf_pad_grninf_preop$underweight) <- "Underweight (BMI<18)"
+
+  puf_pad_grninf_preop$overweight <- ifelse(puf_pad_grninf_preop$BMI > "25" & puf_pad_grninf_preop$BMI < "30", TRUE, FALSE)
+  puf_pad_grninf_preop$overweight <- ifelse(is.na(puf_pad_grninf_preop$overweight), 
+                                           FALSE, puf_pad_grninf_preop$overweight)
+  label(puf_pad_grninf_preop$overweight) <- "Overweight (25<BMI<30)"
+
+  puf_pad_grninf_preop$obese <- ifelse(puf_pad_grninf_preop$BMI > "30", TRUE, FALSE)
+  puf_pad_grninf_preop$obese <- ifelse(is.na(puf_pad_grninf_preop$obese), 
+                                          FALSE, puf_pad_grninf_preop$obese)
+  label(puf_pad_grninf_preop$obese) <- "Obese (BMI>30)"
+
+  ##Create variable for BMI > 35 - Xu 
+  puf_pad_grninf_preop$BMI35 <- ifelse(puf_pad_grninf_preop$BMI > "35", TRUE, FALSE)
+  puf_pad_grninf_preop$BMI35 <- ifelse(is.na(puf_pad_grninf_preop$BMI35), 
+                                          FALSE, puf_pad_grninf_preop$BMI35)
+  label(puf_pad_grninf_preop$BMI35) <- "BMI35 (BMI>35)"
+  
+  ##Create variable for BMI > 40 - Aziz
+  puf_pad_grninf_preop$BMI40 <- ifelse(puf_pad_grninf_preop$BMI > "40", TRUE, FALSE)
+  puf_pad_grninf_preop$BMI40 <- ifelse(is.na(puf_pad_grninf_preop$BMI40), 
+                                          FALSE, puf_pad_grninf_preop$BMI40)
+  label(puf_pad_grninf_preop$BMI40) <- "BMI40 (BMI>40)"
+
+
+  puf_pad_grninf_preop <- puf_pad_grninf_preop[ , !(names(puf_pad_grninf_preop) %in% c("height", "weight"))]
+  
+# Smoking Status - Fischer, Bennett, Xu, Fischer
+
+  label(puf_pad_grninf_preop$smoke) <- "Current Smoker"
+
+# Functional Status - Xu, Wiseman, Eslami (mFI component)
+
+  ## Eslami et al included mFI - they used the mFI 11, however many of these variables are no longer available in NSQIP and a   shorter mFI 5 has been described (Subramaniam et al).  We will use this one.  We will create variables, for functional status,   diabetes, history of COPD, history of CHF, hypertension.
+
+  puf_pad_grninf_preop$fnst_any <- ifelse(puf_pad_grninf_preop$fnstatus2 == "Partially dependent" |
+                                          puf_pad_grninf_preop$fnstatus2 == "Totally dependent", TRUE, FALSE)
+  label(puf_pad_grninf_preop$fnst_any) <- "Dependent Functional Status (Partially or Totally)"
+
+  ##Totally dependent functional status (fnstatus2).Based on the         variables listed in fnstatus1 vs fnstatus2, I think we   would want to    use fnstatus2 - Wiseman
+  puf_pad_grninf_preop$fnst_par <- ifelse(puf_pad_grninf_preop$fnstatus2 == "Partially dependent", TRUE, FALSE)
+  label(puf_pad_grninf_preop$fnst_par) <- "Partially Dependent Functional Status"
+
+  puf_pad_grninf_preop$fnst_dep <- ifelse(puf_pad_grninf_preop$fnstatus2 == "Totally dependent", TRUE, FALSE)
+  label(puf_pad_grninf_preop$fnst_dep) <- "Totally Dependent Functional Status"
+  
+# Create an object for all new column names created in this code chunk
+  
+column_names_w_demo <- colnames(puf_pad_grninf_preop)
+demo_names <- setdiff(column_names_w_demo, column_names_no_demo)
+  
+#Create a table with frequencies for the demographic features
+
+table_2outcome(puf_pad_grninf_preop, demo_names, "grninf", "s_grninf")
+
+```
+
+## Comorbidities
+
+```{r Comorbidity variables, echo=FALSE, warning=FALSE, message=FALSE}
+
+col_no_comorbid <- colnames(puf_pad_grninf_preop)
+
+# Diabetes Mellitus - Xu, Sorour, Kalish, Wiseman, Gwilym - Deep, Eslami (mFI component)
+
+  ## Model includes a variable for any diabetes - Gwylim - Deep, Eslami (mFI Component), Xu
+  puf_pad_grninf_preop$dm_any <- ifelse(puf_pad_grninf_preop$dm_insulin == "Insulin" |
+                                        puf_pad_grninf_preop$dm_insulin == "Meds or Diet", TRUE, FALSE)
+  puf_pad_grninf_preop$dm_any <- ifelse(is.na(puf_pad_grninf_preop$dm_any), 
+                                        FALSE, puf_pad_grninf_preop$dm_any)
+  label(puf_pad_grninf_preop$dm_any) <- "Diabetes Mellitus"
+
+  #Create insulin dependent diabetes variable. The false value           represent the patients with diabetes who are not          insulin dependent. -   Wiseman
+
+  puf_pad_grninf_preop$dm_ins <- ifelse(puf_pad_grninf_preop$dm_insulin == "Insulin", TRUE, FALSE)
+  puf_pad_grninf_preop$dm_ins <- ifelse(is.na(puf_pad_grninf_preop$dm_ins), 
+                                        FALSE, puf_pad_grninf_preop$dm_ins)
+  label(puf_pad_grninf_preop$dm_ins) <- "Insulin-dependent Diabetes Mellitus"
+
+  puf_pad_grninf_preop$dm_nonins <- ifelse(puf_pad_grninf_preop$dm_insulin == "Meds or Diet", TRUE, FALSE)
+  puf_pad_grninf_preop$dm_nonins <- ifelse(is.na(puf_pad_grninf_preop$dm_nonins), 
+                                      FALSE, puf_pad_grninf_preop$dm_nonins)
+  label(puf_pad_grninf_preop$dm_nonins) <- "Noninsulin-dependent Diabetes Mellitus"
+
+# COPD - Leekha, Sorour, Xu, Wiseman, Eslami (mFI component), Aziz
+
+  ##Utilize hxCOPD variable for COPD. No need to create a new variable. - Leekha, wiseman
+  puf_pad_grninf_preop$copd <- ifelse(puf_pad_grninf_preop$hxcopd == "TRUE", TRUE, FALSE)
+  label(puf_pad_grninf_preop$copd) <- "COPD"
+
+  #Create variable for dyspnea with moderate exertion. Can utilize the   when_dyspnea variable. - Wiseman
+  puf_pad_grninf_preop$dysp_mod <-   ifelse(puf_pad_grninf_preop$when_dyspnea == "Moderate exertion", TRUE, FALSE)
+  puf_pad_grninf_preop$dysp_mod <- ifelse(is.na(puf_pad_grninf_preop$dysp_mod), 
+                                         FALSE, puf_pad_grninf_preop$dysp_mod)
+  label(puf_pad_grninf_preop$dysp_mod) <- "Dyspnea with Moderate Exertion"
+
+  puf_pad_grninf_preop$dysp_rest <- ifelse(puf_pad_grninf_preop$when_dyspnea == "At rest", TRUE, FALSE)
+  puf_pad_grninf_preop$dysp_rest <- ifelse(is.na(puf_pad_grninf_preop$dysp_rest), 
+                                        FALSE, puf_pad_grninf_preop$dysp_rest)
+  label(puf_pad_grninf_preop$dysp_rest) <- "Dyspnea at Rest"
+  
+# Coronary Artery Disease/Cardiac History - Leekha, Wiseman, Eslami (included in mFI), Xu
+
+  ##Create variable ischemic heart disease using presence of HTN or CHF. Unfortunately, both hxmi    and hxangina are retired    variables and missing in this dataset.  The pad_hrf_phys includes         whether there is a recent MI, but this is a          composite variable and it does not distinguish         whether the high risk feature is related to ischemic heart disease.
+  puf_pad_grninf_preop$heart_dz <- ifelse(puf_pad_grninf_preop$hxchf == "TRUE" | 
+                                          puf_pad_grninf_preop$hypermed == 'TRUE', TRUE, FALSE)
+  label(puf_pad_grninf_preop$heart_dz) <- "Ischemic Heart Disease"
+
+  ## Xu includes a variable for the absence of CAD
+  puf_pad_grninf_preop$no_heart_dz <- ifelse(puf_pad_grninf_preop$heart_dz == FALSE, TRUE, FALSE)
+
+  #No need to create a new variable for hypertension. Can utilize     "hypermed" variable. = Wiseman, Eslami (mFI Component)
+  puf_pad_grninf_preop$htn <- ifelse(puf_pad_grninf_preop$hypermed == "TRUE", TRUE, FALSE)
+  label(puf_pad_grninf_preop$htn) <- "HTN"
+
+  ## Congestive Heart Failure - Eslami (mFI component)
+  puf_pad_grninf_preop$CHF <- ifelse(puf_pad_grninf_preop$hxchf == "TRUE", TRUE, FALSE)
+  label(puf_pad_grninf_preop$CHF) <- "CHF"
+
+# Neurological disease data is not available in this form of NSQIP. - Wiseman
+
+# We will use dialysis variable. - Bennet
+  puf_pad_grninf_preop$esrd <- ifelse(puf_pad_grninf_preop$dialysis == "TRUE", TRUE, FALSE)
+  label(puf_pad_grninf_preop$esrd) <- "ESRD on Dialysis"
+
+  ## We will create binary variables for different values of Cr 1.5-2 and >2 - Eslami
+  puf_pad_grninf_preop$cr_152 <- ifelse(puf_pad_grninf_preop$prcreat > 1.5 & puf_pad_grninf_preop$prcreat < 2, TRUE, FALSE)
+  label(puf_pad_grninf_preop$cr_152) <- "Creatinine 1.5-2.0 mg/dL"
+
+  puf_pad_grninf_preop$cr_gr2 <- ifelse(puf_pad_grninf_preop$prcreat >= 2, TRUE, FALSE)
+  label(puf_pad_grninf_preop$cr_gr2) <- "Creatinine > 2.0 mg/dL"
+
+# Create a variable for malnutrition. - Bennett
+  ## Create a variable for malnutrition based what components are        available from PONS (Wischmeyer et al 2018), the        components of which   are:
+  ## BMI < 18.5; Weightloss >10% in last 6mo; Reduced oral intake by     50% in past week; Preop serum albumin <3.0 g/dL
+  puf_pad_grninf_preop$malnut <- ifelse(puf_pad_grninf_preop$pralbum < "3.0" | 
+                                        puf_pad_grninf_preop$wtloss == "TRUE" | 
+                                        puf_pad_grninf_preop$BMI < "18.5", TRUE, FALSE)
+  puf_pad_grninf_preop$malnut <- ifelse(is.na(puf_pad_grninf_preop$malnut), 
+                                          FALSE, puf_pad_grninf_preop$malnut)
+  label(puf_pad_grninf_preop$malnut) <- "Malnutrition"
+
+# Immunosuppresion - We will use steroid as a proxy for immunosuppression - Sorour
+  label(puf_pad_grninf_preop$steroid) <- "Immunosuppression or Steroid Use"
+
+# We will use the bleeddis and wtloss variable as is.
+  label(puf_pad_grninf_preop$bleeddis) <- "Bleeding Disorder"
+  label(puf_pad_grninf_preop$wtloss) <- "Weightloss"
+
+# Frailty Index - Create 5 variable modified frailty index - Eslami
+  #Create 5 variable modified frailty index 
+  puf_pad_grninf_preop$mFI = (puf_pad_grninf_preop$fnst_any + puf_pad_grninf_preop$dm_any + puf_pad_grninf_preop$copd +       puf_pad_grninf_preop$CHF + puf_pad_grninf_preop$htn)/5
+  puf_pad_grninf_preop$mFI <- as.numeric(puf_pad_grninf_preop$mFI)
+  
+# ASA Class - Wiseman
+
+  ##Create variables for ASA class 4 or for ASA class 5. Can utilize asaclas variable. - Wiseman
+  puf_pad_grninf_preop$asa_class_3 <-ifelse(puf_pad_grninf_preop$asaclas == "3", TRUE, FALSE)
+  label(puf_pad_grninf_preop$asa_class_3) <- "ASA Class 3"
+
+  puf_pad_grninf_preop$asa_class_45 <-ifelse(puf_pad_grninf_preop$asaclas == "4"| 
+                                             puf_pad_grninf_preop$asaclas == "5", TRUE, FALSE)
+  label(puf_pad_grninf_preop$asa_class_45) <- "ASA Class 4 or 5"
+
+
+
+
+col_w_cormorbid <- colnames(puf_pad_grninf_preop)
+comorbid_col <- setdiff(col_w_cormorbid, col_no_comorbid)
+
+table_2outcome(puf_pad_grninf_preop, comorbid_col, "grninf", "s_grninf")
+
+```
+
+## Procedure Specific Variables
+
+```{r Procedure Specific Variables, echo=FALSE, warning=FALSE, message=FALSE}
+
+col_no_proc <- colnames(puf_pad_grninf_preop)
+
+# Indication - Leekha, Wiseman, Kalish, Eslami (mFI), Leekha
+
+  ## Create variable critical limb ischemia based on PAD symptom         variable in NSQIP. PAD symptoms is divided into rest    pain, tissue      loss, asymptomatic, or claudication. For critical limb ischemia, will   include rest pain and tissue loss.   However, we will use the            abbreviation 'clti' instead of 'cli' to align with more modern         disease             definitions. - Leekha, Wiseman
+  source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem_inf_icd_groups.R")
+
+  puf_pad_grninf_preop$clti <-  ifelse(puf_pad_grninf_preop$pad_sympt == "Rest pain" |
+                                       puf_pad_grninf_preop$podiag_combined %in% icd_rest_pain |
+                                       puf_pad_grninf_preop$pad_sympt == "Tissue loss" |
+                                       puf_pad_grninf_preop$podiag_combined %in% icd_tissue, TRUE, FALSE)
+  puf_pad_grninf_preop$clti <- ifelse(is.na(puf_pad_grninf_preop$clti), 
+                                      FALSE, puf_pad_grninf_preop$clti)
+  label(puf_pad_grninf_preop$clti) <- "Chronic Limb Threatening Ischemia"
+
+  puf_pad_grninf_preop$proc_ai <- ifelse(puf_pad_grninf_preop$cpt %in% cpt_ai, TRUE, FALSE)
+  label(puf_pad_grninf_preop$proc_ai) <- "Procedure: Aortoiliac"
+
+# Procedure - Create variable for aortoiliac and LE from previously developed CPT groups. Wiseman
+
+  puf_pad_grninf_preop$proc_ai <- ifelse(puf_pad_grninf_preop$cpt %in% cpt_ai, TRUE, FALSE)
+  label(puf_pad_grninf_preop$proc_ai) <- "Procedure: Aortoiliac"
+
+  ##Create variable for lower extremity bypass
+
+  puf_pad_grninf_preop$proc_ler <- ifelse(puf_pad_grninf_preop$cpt %in% cpt_le, TRUE, FALSE)
+  label(puf_pad_grninf_preop$proc_ler) <- "Procedure: Infrainguinal"
+
+  
+# ABI Measurement - Not in NSQIP - Kalish
+
+# Active infection at time of procedure - Xu
+
+  ##Xu utilizes WBC >9.9 at the time of procedure, which is likely a proxy for active infection at the time of
+  ##Revascularization - Another proxy is the use of prolonged antibiotics, therefore we will use that instead.
+  
+  puf_pad_grninf_preop$wbc99 <- ifelse(puf_pad_grninf_preop$prwbc > 9.9, TRUE, FALSE)
+
+
+# Prior ipsilateral Revascularization or Groin Incision - Leekha, Bennett, Fischer
+
+  #For reoperative groin, will utilize the hrf_anat feature. Bennett et   al defined reoperative groin as "presence of previous groin incision   on ipsilateral side." We will use hrf_anat for previous ipsilateral    bypass. - Bennett, Fischer
+
+  puf_pad_grninf_preop$reop_groin <-   ifelse(puf_pad_grninf_preop$pad_hrf_anat == "Prior ipsilateral bypass"| 
+                                            puf_pad_grninf_preop$podiag_combined %in% icd_prrevasc |
+                                            puf_pad_grninf_preop$cpt %in% cpt_prrevasc, TRUE, FALSE)
+puf_pad_grninf_preop$reop_groin <- ifelse(is.na(puf_pad_grninf_preop$reop_groin), 
+                                        FALSE, puf_pad_grninf_preop$reop_groin)
+label(puf_pad_grninf_preop$reop_groin) <- "Reoperative Groin"
+
+  ##Create previous revascularization variable based on "PAD high risk   features anatomic". High risk features anatomic is divided into   prior   ipsilateral bypass, prior percutaneous intervention, and prior         abdominal surgery. Leekha et al defines prior            revascularization as     either a prior surgical or percutaneous revascularization procedure.   - Leekha and Aziz 
+  puf_pad_grninf_preop$prrevasc_ips <- ifelse(puf_pad_grninf_preop$pad_hrf_anat == "Prior ipsilateral bypass" | 
+                                          puf_pad_grninf_preop$pad_hrf_anat == "Prior ipsilateral percutaneous intervention" |
+                                          puf_pad_grninf_preop$podiag_combined %in% icd_prrevasc |
+                                          puf_pad_grninf_preop$cpt %in% cpt_prrevasc, TRUE, FALSE)
+  puf_pad_grninf_preop$prrevasc_ips <- ifelse(is.na(puf_pad_grninf_preop$prrevasc_ips), 
+                                      FALSE, puf_pad_grninf_preop$prrevasc_ips)
+  label(puf_pad_grninf_preop$prrevasc_ips) <- "Previous Ipsilateral Revascularization"
+
+  ## Previous Surgical Site Infection - Leekha - Not inlcuded in the NSQIP Data
+
+  ## Combined Femoral Reconstruction - Xu
+  
+  puf_pad_grninf_preop$endart <- ifelse(puf_pad_grninf_preop$cpt %in% cpt_cfea == TRUE, TRUE, FALSE)
+
+  ## Conduit Selection - Gwilym, Gwilym - Deep, Bennett, Fischer
+
+  ## Create variable for vein bypass material based on CPT, based on previously developed CPT        groupings. - Gwilym
+  source("P:/Pro00113988 - PAD Risk Models/Vasc Fem Inf/vasc_fem_inf/code/vasc_fem_inf_cpt_groups.R")
+
+  puf_pad_grninf_preop$vein <- ifelse(puf_pad_grninf_preop$cpt %in% cpt_vein, TRUE, FALSE)
+  label(puf_pad_grninf_preop$vein) <- "Bypass Conduit: Vein"
+
+  ## Create variable for xenograft material - most often used for patches for CFEA however SHOULD    NOT MAKE THIS ASSUMPTION, PER DR.    MUREEBE - therefore we will not include this variable in the     model as there is no way to clearly map this variable. - Gwilym
+  ## puf_pad_grninf_preop$patch <- ifelse(puf_pad_grninf_preop$cpt %in% cpt_patch, TRUE, FALSE)
+
+  ## Create variable for prosthetic material - Gwilym
+  puf_pad_grninf_preop$prsth <- ifelse(puf_pad_grninf_preop$cpt %in% cpt_prsth, TRUE, FALSE)
+  label(puf_pad_grninf_preop$prsth) <- "Bypass Conduit: Prosthetic"
+
+# Operation Duration - Sorour, Wiseman, Gwilym, Aziz, Kalish, Xu
+
+  ## Create variable for operative time by dividing the optime minutes by 60 - Gwilym
+  puf_pad_grninf_preop$optime_hrs <- ((puf_pad_grninf_preop$optime)/60)
+  puf_pad_grninf_preop <- puf_pad_grninf_preop %>%
+    mutate(optime_hrs = as.numeric(optime_hrs))
+  #label(puf_pad_grninf_preop$optime_hrs) <- "Operative Time (Hours)"
+
+  ##Utilize optime variable and optime6h already created for Gwilym et al, 
+  ##but create variable for optime between 4-6hr - Wiseman
+  
+  puf_pad_grninf_preop$optime46h <- ifelse(puf_pad_grninf_preop$optime_hrs > "4" & 
+                                             puf_pad_grninf_preop$optime_hrs < "6", TRUE, FALSE)
+  puf_pad_grninf_preop$optime46h <- ifelse(is.na(puf_pad_grninf_preop$optime46h), 
+                                         FALSE, puf_pad_grninf_preop$optime46h)
+  label(puf_pad_grninf_preop$optime46h) <- "Procedure Duration (4-6hrs)"
+  puf_pad_grninf_preop$optime6h <- ifelse(puf_pad_grninf_preop$optime_hrs > "6", TRUE, FALSE)
+  
+  ## Operative Length greater than 6 hours - Xu
+  puf_pad_grninf_preop$optime6h <- ifelse(is.na(puf_pad_grninf_preop$optime6h), 
+                                         FALSE, puf_pad_grninf_preop$optime6h)
+  label(puf_pad_grninf_preop$optime6h) <- "Procedure Duration (>6hrs)"
+
+  ##Create variable for operative time> 220 minutes - Kalish
+  #Create variable for operative time> 220 minutes
+  puf_pad_grninf_preop$optime220 <- ifelse(puf_pad_grninf_preop$optime >"220", TRUE, FALSE)
+  puf_pad_grninf_preop$optime220 <- ifelse(is.na(puf_pad_grninf_preop$optime220), 
+                                         FALSE, puf_pad_grninf_preop$optime220)
+  label(puf_pad_grninf_preop$optime220) <- "Procedure Duration (>220)"
+  
+  ## Optime >5h - Sorour and Aziz
+  puf_pad_grninf_preop$optime5h <- ifelse(puf_pad_grninf_preop$optime_hrs > "5", TRUE, FALSE)
+  puf_pad_grninf_preop$optime5h <- ifelse(is.na(puf_pad_grninf_preop$optime5h), 
+                                         FALSE, puf_pad_grninf_preop$optime5h)
+  label(puf_pad_grninf_preop$optime5h) <- "Procedure Duration (>5hrs)"
+
+# Procedure Urgency - Bennett
+
+  #Create a new variable for urgent or emergent from emergncy variable - Bennet
+  puf_pad_grninf_preop$urgnt <- ifelse(puf_pad_grninf_preop$emergncy == "TRUE", TRUE, FALSE)
+  label(puf_pad_grninf_preop$urgnt) <- "Urgent or Emergent Procedure"
+  
+# Skin Preparation Type - Gwilym
+
+  ## Create variable Skin_preparation.  The common practice in the US is to utilize alcoholic        chlorhexidine, which seemed to be    the majority of cases in this study and there was no difference   when compared with aqueous chlorhexidine, alcoholic betadine or two   solutions.  The only solution   strongly associated with wound infection would be aqueous betadine.  In my practice, I only use         these when there is an open wound.  Therefore, I think it would be reasonable to utilize wndinf     variable as a proxy for this.
+  puf_pad_grninf_preop$prep_aq_beta <- ifelse(puf_pad_grninf_preop$wndinf == TRUE | 
+                                          puf_pad_grninf_preop$wndclas == "2" | 
+                                          puf_pad_grninf_preop$wndclas == "3" | 
+                                          puf_pad_grninf_preop$wndclas == "4", 
+                                        TRUE, FALSE)
+  label(puf_pad_grninf_preop$prep_aq_beta) <- "Skin Prep: Aqueous Betadine"
+
+  # Chlorhexidine was found to be protective. We will use the same variable created for aqeous betadine developed for the Gwilym model.   This was a proxy variable created because the common practice in the US is to utilize alcoholic chlorhexidine, and typically variation   is seen when there is an open wound. - Kalish
+
+#Post operative variables - excluded from performance evaluation
+
+  ## Reoperation - Wiseman, Aziz
+  ## Wound disruption/dehiscence - Aziz
+  ## Postoperative Blood Transfusion - Wiseman, Aziz, Kalish
+  ## Prolonged length of stay (>28d) - Aziz
+  ## Postoperative UTI - Aziz
+
+col_w_proc <- colnames(puf_pad_grninf_preop)
+proc_col <- setdiff(col_w_proc, col_no_proc)
+
+table_2outcome(puf_pad_grninf_preop, proc_col, "grninf", "s_grninf")
+
+```
+
+# Discrimination and Calbiration
+
+Once the variables were developed, each of the four models was evaluated on the NSQIP dataset. This was done by utilizing the equations from each paper. Below is the code for the calculating each prediction term based on the information included in the publication and comparison of AUC and calibration curves.
+
+```{r calculate prediction and nomogram values, warning=FALSE, message=FALSE, echo=FALSE}
+
+attach(puf_pad_grninf_preop)
+
+# Calculate predicted values for Gwilym et al
+puf_pad_grninf_preop$g_beta <- -4.846 +
+         0.535*(female) +
+         0.629*(underweight) +
+         0.264*(overweight) +
+         1.070*(obese) +
+         0.793*(heart_dz) -
+         #0.394*(prep_aq_chlo) -
+         #0.058*(prep_al_beta) +
+         1.024*(prep_aq_beta) +
+         #0.021*(prep_two_thr) +
+         0.884*(vein) +
+         0.938*(prsth) +
+         0.142*(optime_hrs)
+puf_pad_grninf_preop$g_pred <- 1 / (1+exp(-puf_pad_grninf_preop$g_beta))
+
+#Calculate predicted values for Gwilym et al deep SSI model
+puf_pad_grninf_preop$gd_beta <- -4.262 +
+         0.666*(female) +
+         0.666*(dm_any) -
+         #0.108*(prep_aq_chlo) -
+         #0.332*(prep_al_beta) +
+         1.418*(prep_aq_beta) +
+         #0.207*(prep_two_thr) +
+         0.027*(vein) +
+         0.325*(prsth)
+puf_pad_grninf_preop$gd_pred <- 1 / (1+exp(-puf_pad_grninf_preop$gd_beta))
+
+#Calculate predicted values for Leekha et al
+puf_pad_grninf_preop$l_beta <- 1.07*(clti) +
+          0.74*(hxcopd) +
+          0.99*(prrevasc_ips)
+puf_pad_grninf_preop$l_pred <- 1 / (1+exp(-puf_pad_grninf_preop$l_beta))
+
+
+
+puf_pad_grninf_preop$l_score <-
+  1*clti +
+  1*hxcopd +
+  1*prrevasc_ips +
+  2*(0)
+
+puf_pad_grninf_preop$l_nomo <- case_when(
+  puf_pad_grninf_preop$l_score == 0 ~ 0.01,
+  puf_pad_grninf_preop$l_score == 1 ~ 0.03,
+  puf_pad_grninf_preop$l_score == 2 ~ 0.06,
+  puf_pad_grninf_preop$l_score == 3 ~ 0.12,
+  puf_pad_grninf_preop$l_score == 4 ~ 0.28,
+  puf_pad_grninf_preop$l_score == 5 ~ 0.49
+)
+
+#Calculate predicted values for Bennett et al
+puf_pad_grninf_preop$b_beta <- log(3.01)*(reop_groin) +
+             log(3.46)*(female) +
+             log(1.01)*(BMI) +
+             log(4.37)*(esrd) +
+             log(7.22)*(malnut) +
+             log(2.98)*(urgnt)
+puf_pad_grninf_preop$b_pred <- 1 / (1+exp(-puf_pad_grninf_preop$b_beta))
+
+#Calculate predicted values for Wiseman et al 
+puf_pad_grninf_preop$w_beta <- log(1.4)*(female) +
+                log(0.9)*(age65) +
+                log(0.8)*(blkrace) +
+                log(0.9)*(othrace) +
+                log(1.3)*(overweight) +
+                log(2.3)*(obese) +
+                log(0.8)*(underweight) +
+                log(1.3)*(dm_ins) + 
+                log(1.2)*(dm_nonins) +
+                log(1.2)*(smoke) +
+                log(1.2)*(hypermed) +
+                log(1.1)*(heart_dz) +
+                log(1.2)*(clti) +
+                log(1.1)*(fnst_par) +
+                log(0.5)*(fnst_dep) +
+                log(1.1)*(hxcopd) +
+                #log(1.1)*(neuro) +
+                log(1.4)*(optime46h) +
+                log(1.5)*(optime6h) +
+                log(2.4)*(proc_ai) +
+                log(3.1)*(proc_ler) +
+                log(1.2) +
+                log(0.9)*(vein) +
+                log(0.8)*(prsth) +
+                log(1.1)*(asa_class_3) +
+                log(1.2)*(asa_class_45)
+puf_pad_grninf_preop$w_pred <- 1 / (1+exp(-puf_pad_grninf_preop$w_beta)) 
+
+puf_pad_grninf_preop$w_score <-
+  12*proc_ler +
+  9*proc_ai +
+  9*obese +
+  5*optime6h +
+  4*female +
+  3*overweight +
+  3*optime46h +
+  3*dm_ins +
+  2*dm_nonins +
+  2*smoke +
+  2*hypermed +
+  2*clti +
+  2*(0) + #dyspnea with moderate exercise
+  2*(1) + #groin anastomosis
+  2*asa_class_45 +
+  1*hxcopd +
+  1*heart_dz +
+  #1*neuro -
+  1*age65 -
+  2*blkrace -
+  4*(0) - #sepsis complication
+  6*(0) - #renal complication
+  6*fnst_dep -
+  9*(0) #LOS >14d
+
+puf_pad_grninf_preop$w_nomo <- case_when(
+  puf_pad_grninf_preop$w_score < 16 ~ 0.021,
+  puf_pad_grninf_preop$w_score >= 16 & puf_pad_grninf_preop$w_score <= 20 ~ 0.051,
+  puf_pad_grninf_preop$w_score >= 21 & puf_pad_grninf_preop$w_score <= 25 ~ 0.078,
+  puf_pad_grninf_preop$w_score >25 ~ 0.14
+)
+
+puf_pad_grninf_preop$s_score <- obese + dm_ins + hxcopd + optime5h
+
+puf_pad_grninf_preop$s_nomo <- case_when(
+  puf_pad_grninf_preop$s_score == 0 ~ 0.12,
+  puf_pad_grninf_preop$s_score == 1 ~ 0.10,
+  puf_pad_grninf_preop$s_score == 2 ~ 0.12,
+  puf_pad_grninf_preop$s_score == 3 ~ 0.43,
+  puf_pad_grninf_preop$s_score == 4 ~ 0.6,
+  puf_pad_grninf_preop$s_score == 5 ~ 1.0
+)
+
+#Calculate predicted values for Eslami et al 
+puf_pad_grninf_preop$mFI <- as.numeric(puf_pad_grninf_preop$mFI)
+
+puf_pad_grninf_preop$e_beta <- log(1.01)*(mFI) +
+                log(0.98)*(age) +
+                log(1.3)*(female) +
+                log(1.44)*(overweight) +
+                log(2.73)*(obese) +
+                log(0.86)*(cr_152) +
+                log(1.33)*(cr_gr2) +
+                log(1.08)*(asa_class_3) + 
+                log(1.86)*(asa_class_45)
+puf_pad_grninf_preop$e_pred <- 1 / (1+exp(-puf_pad_grninf_preop$e_beta))
+
+#Calculate predicted values for Aziz et al 
+puf_pad_grninf_preop$a_beta <- log(2.28)*(BMI40) +
+  log(1.98)*(optime5h) +
+  log(1.98)*(prrevasc_ips) +
+  log(1.73)*(hxcopd)
+puf_pad_grninf_preop$a_pred <- 1 / (1+exp(-puf_pad_grninf_preop$a_beta))
+
+#Calculate predicted values for Kalish et al 
+puf_pad_grninf_preop$k_beta <- 
+  #log(1.54)*(abi_35) +
+  log(2.11)*(optime220) +
+  log(0.53)*(1 - prep_aq_beta)
+puf_pad_grninf_preop$k_pred <- 1 / (1+exp(-puf_pad_grninf_preop$k_beta))
+
+puf_pad_grninf_preop$k_score <- optime220 + prep_aq_beta
+
+puf_pad_grninf_preop$k_nomo <- case_when(
+  puf_pad_grninf_preop$k_score == 1 ~ 0.032,
+  puf_pad_grninf_preop$k_score == 2 ~ 0.048
+)
+
+puf_pad_grninf_preop$x_score <- 4 * BMI35 + 2 * whtrace + 2 * endart + no_heart_dz + age73 + dm_any + optime6h + wbc99
+
+puf_pad_grninf_preop$x_nomo <- case_when(
+  puf_pad_grninf_preop$x_score <= 3 ~ 0.045,
+  (puf_pad_grninf_preop$x_score >= 4 &
+     puf_pad_grninf_preop$x_score <=7) ~ 0.085,
+  (puf_pad_grninf_preop$x_score >= 8 &
+     puf_pad_grninf_preop$x_score <= 11) ~ 0.138,
+  puf_pad_grninf_preop$x_score >= 12 ~ 0.238
+)
+
+puf_pad_grninf_preop$f_score <- 2 * obese + 2 * smoke + 2 * reop_groin + prsth
+
+puf_pad_grninf_preop$f_nomo <- case_when(
+  puf_pad_grninf_preop$f_score <= 2 ~ 0.202,
+  (puf_pad_grninf_preop$f_score >= 3 &
+     puf_pad_grninf_preop$f_score <= 4) ~ 0.50,
+  puf_pad_grninf_preop$f_score >= 5 ~ 0.71
+)
+
+puf_pad_grninf_preop <- puf_pad_grninf_preop[ , !(names(puf_pad_grninf_preop) %in% c("g_beta", "gd_beta", "l_beta", "b_beta", "w_beta", 
+                                                                                     "l_score", "w_score", "s_score", "e_beta", 
+                                                                                     "a_beta", "k_beta", "k_score", "x_score", "f_score"))]
+
+models_disc <- tibble(
+  Labels = c("Aziz", "Bennett", "Eslami", "Fischer", "Gwilym", "Gwilym - Deep", "Kalish", "Leehka", "Sorour", "Wiseman", "Xu"),
+  Prediction = c("a_pred", "b_pred", "e_pred", "f_nomo", "g_pred", "gd_pred", "k_nomo", "l_nomo", "s_nomo", "w_nomo", "x_nomo")
+)
+
+
+models_cal <- tibble(
+  Labels = c("Fischer", "Gwilym", "Gwilym - Deep", "Kalish", "Leehka", "Sorour", "Wiseman", "Xu"),
+  Prediction = c("f_nomo", "g_pred", "gd_pred", "k_nomo", "l_nomo", "s_nomo", "w_nomo", "x_nomo")
+)
+```
+
+## Discrimintation for Any Groin SSI
+
+```{r ROC Curves for grninf, warning=FALSE, message=FALSE, echo=FALSE}
+puf_pad_grninf_preop$grninf <- as.factor(puf_pad_grninf_preop$grninf)
+
+plot_auc(models_disc, puf_pad_grninf_preop, "grninf", "AUC for Any Groin Infection - NSQIP")
+
+```
+
+## Discriminiation for Severe Groin SSI
+
+```{r ROC Curves for s_grninf, warning=FALSE, message=FALSE, echo=FALSE}
+# Plot ROC and calculate AUC using the yardstick package, which is a part of tidymodels
+puf_pad_grninf_preop$s_grninf <- as.factor(puf_pad_grninf_preop$s_grninf)
+
+plot_auc(models_disc, puf_pad_grninf_preop, "s_grninf", "AUC for Severe Groin Infection - NSQIP")
+
+```
+
+## Calibration for Any Groin SSI
+
+```{r calibration plots for any groin SSI, warning=FALSE, message=FALSE, echo=FALSE}
+
+plot_calibration(models_cal, puf_pad_grninf_preop, "grninf", "Any Groin Infection - NSQIP")
+
+```
+```{r ECE for any groin SSI, warning=FALSE, message=FALSE, echo=FALSE}
+
+# Convert grninf to numeric (0/1)
+puf_pad_grninf_preop <- puf_pad_grninf_preop %>%
+  mutate(outcome_num = as.numeric(as.logical(grninf)))
+
+# Initialize results list
+ece_results <- list()
+
+# Loop through each model
+for (model_name in models_cal$Prediction) {
+  
+  # Filter out rows with missing predictions or outcome
+  df <- puf_pad_grninf_preop[!is.na(puf_pad_grninf_preop[[model_name]]) & !is.na(puf_pad_grninf_preop$outcome_num), ]
+  
+  # Calculate mean ece
+  pred <- df[[model_name]]
+  truth <- df$outcome_num
+  mean_ece <- calc_ece(pred, truth)
+  
+  # Bootstrap
+  boot_out <- boot(data = df, statistic = function(data, i) boot_ece(data, i, model_name), R = 200, parallel = "snow")
+
+  ci <- boot.ci(boot_out, type = "perc", index = 1)
+
+  # Store results
+  ece_results[[model_name]] <- list(
+    Model = model_name,
+    ece = mean_ece,
+    ci_lower = ci$percent[4],
+    ci_upper = ci$percent[5],
+    n = nrow(df)  # Optional: include sample size used
+  )
+}
+
+ece_grninf <- bind_rows(ece_results)
+
+ece_grninf <- ece_grninf %>%
+    left_join(models_cal, by = c("Model" = "Prediction")) %>%
+    select(Labels, Model, ece, ci_lower, ci_upper)
+
+print(ece_grninf)
+
+# Create the forest plot
+  ggplot(ece_grninf, aes(x = ece, y = reorder(Labels, 1/ece))) +
+    geom_point(size = 1, color = "black") +
+    geom_errorbarh(aes(xmin = ci_lower, xmax = ci_upper), height = 0.2, color = "gray30") +
+    theme_bw(base_size = 12) +
+    xlim(0, 0.275) +
+    labs(x = "ECE (95% CI)", y = "", title = paste("ECE for Any Groin Infection - NSQIP")) +
+    theme(panel.grid.major.y = element_blank())
+
+```
+
+
+## Calibration for Severe Groin SSI
+
+```{r calibration plots for severe groin SSI, warning=FALSE, message=FALSE, echo=FALSE}
+
+plot_calibration(models_cal, puf_pad_grninf_preop, "s_grninf", "Severe Groin Infection - NSQIP")
+
+```
+
+```{r ECE for severe groin SSI, warning=FALSE, message=FALSE, echo=FALSE}
+
+# Convert grninf to numeric (0/1)
+puf_pad_grninf_preop <- puf_pad_grninf_preop %>%
+  mutate(outcome_num = as.numeric(as.logical(s_grninf)))
+
+# Initialize results list
+ece_results <- list()
+
+# Loop through each model
+for (model_name in models_cal$Prediction) {
+  
+  # Filter out rows with missing predictions or outcome
+  df <- puf_pad_grninf_preop[!is.na(puf_pad_grninf_preop[[model_name]]) & !is.na(puf_pad_grninf_preop$outcome_num), ]
+  
+  # Calculate mean ece
+  pred <- df[[model_name]]
+  truth <- df$outcome_num
+  mean_ece <- calc_ece(pred, truth)
+  
+  # Bootstrap
+  boot_out <- boot(data = df, statistic = function(data, i) boot_ece(data, i, model_name), R = 200, parallel = "snow")
+
+  ci <- boot.ci(boot_out, type = "perc", index = 1)
+
+  # Store results
+  ece_results[[model_name]] <- list(
+    Model = model_name,
+    ece = mean_ece,
+    ci_lower = ci$percent[4],
+    ci_upper = ci$percent[5],
+    n = nrow(df)  # Optional: include sample size used
+  )
+}
+
+ece_s_grninf <- bind_rows(ece_results)
+
+ece_s_grninf <- ece_s_grninf %>%
+    left_join(models_cal, by = c("Model" = "Prediction")) %>%
+    select(Labels, Model, ece, ci_lower, ci_upper)
+
+print(ece_s_grninf)
+
+# Create the forest plot
+  ggplot(ece_s_grninf, aes(x = ece, y = reorder(Labels, 1/ece))) +
+    geom_point(size = 1, color = "black") +
+    geom_errorbarh(aes(xmin = ci_lower, xmax = ci_upper), height = 0.2, color = "gray30") +
+    theme_bw(base_size = 12) +
+    labs(x = "ECE (95% CI)", y = "", title = paste("ECE for Severe Groin Infection - NSQIP")) +
+    theme(panel.grid.major.y = element_blank())
+  
+```
+
+
+# Bias Assessment
+
+```{r bias assessment, warning=FALSE, message=FALSE, echo=FALSE}
+
+bias_vars <- c("female", "blkrace", "operyr_trunc", "indication", "proc", "prsth")
+
+
+puf_pad_grninf_preop$op
+
+## Use ECE, not log-loss or no BSS because this is a rare event
+
+df <- puf_pad_grninf_preop %>%
+    filter(!is.na(female) & !is.na(blkrace))
+
+# Convert grninf to numeric (0/1)
+puf_pad_grninf_preop <- puf_pad_grninf_preop %>%
+  mutate(outcome_num = as.numeric(as.logical(grninf)))
+
+# Initialize results list
+biasll_results <- list()
+
+for (subgroup_var in bias_vars) {
+  #Remove NA levels of bias variables
+
+  subgroup_data <- df %>%
+    group_by(.data[[subgroup_var]]) %>%
+    group_split()
+  
+  for (group in subgroup_data) {
+    group_name <- unique(group[[subgroup_var]])
+    
+    for (model_name in models_cal$Prediction) {
+  
+      # Filter out rows with missing predictions or outcome
+      df <- puf_pad_grninf_preop[!is.na(puf_pad_grninf_preop[[model_name]]) & !is.na(puf_pad_grninf_preop$outcome_num), ]
+  
+      # Calculate mean ece
+      pred <- df[[model_name]]
+      truth <- df$outcome_num
+      mean_ece <- calc_ece(pred, truth)
+  
+      # Bootstrap
+      boot_out <- boot(data = df, statistic = function(data, i) boot_ece(data, i, model_name), R = 200, parallel = "snow")
+
+      ci <- boot.ci(boot_out, type = "perc", index = 1)
+      
+      # Convert logical to factor with levels "TRUE" and "FALSE"
+      group_name_clean <- group_name
+
+      if (is.logical(group_name_clean)) {
+         group_name_clean <- factor(group_name_clean, levels = c(TRUE, FALSE))
+          }
+
+      biasll_results[[length(biasll_results) + 1]] <- tibble(
+        Subgroup_Var = subgroup_var,
+        Subgroup_Level = group_name_clean,
+        Model = model_name,
+        mean = mean(boot_out$t),
+        ci_lower = ci$percent[4],
+        ci_upper = ci$percent[5],
+        n = nrow(df)
+      )
+    }
+  }
+}
+
+biasll_df <- bind_rows(biasll_results)
+
+# Get unique model names
+model_list <- unique(biasll_df$Model)
+
+# Create a named list of plots
+plot_list <- map(model_list, function(model_name) {
+  
+  # Subset data for the current model
+  subset_df <- biasll_df %>%
+    filter(Model == model_name) %>%
+    mutate(Subgroup_Combined = paste(Subgroup_Var, Subgroup_Level, sep = ":"))
+  
+  # Set a value for reference line
+  ref_line_value <- ece_grninf %>%
+    filter(Model == model_name) %>%
+    pull(ece)
+
+  # Create the forest plot
+  ggplot(subset_df, aes(x = mean, y = Subgroup_Combined)) +
+    geom_point(size = 1, color = "black") +
+    geom_errorbarh(aes(xmin = ci_lower, xmax = ci_upper), height = 0.2, color = "gray30") +
+    theme_bw(base_size = 12) +
+    geom_vline(xintercept = ref_line_value, linetype = "dashed", color = "black") +
+    xlim(0,0.275) +
+    labs(x = "ECE (95% CI)", y = "", title = paste("Forest Plot of ECE -", model_name)) +
+    theme(panel.grid.major.y = element_blank())
+})
+
+# Optionally name the list for easy reference
+# names(plot_list) <- model_list
+
+# Example: display plot for "x_nomo"
+print(plot_list)
+
+```
+
+
+```{r export data, echo=FALSE, warning=FALSE, message=FALSE}
+
+puf_pad_grninf_preop$grninf <- as.logical(puf_pad_grninf_preop$grninf)
+
+saveRDS(puf_pad_grninf_preop, file="P:/Pro00113988 - PAD Risk Models/DataRepo/NSQIP/Analysis Data Files/puf_pad_grninf_preop.rds")
+
+```
+
