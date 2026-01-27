@@ -23,7 +23,8 @@ vQI is a clinical registry for outcomes following vascular surgery surgical proc
 
 
 ## Publications
-This analysis has not been published, but we will include relevant publications here.
+
+Singh E, Shafique H, Karpurapu A, Cui C, Kim Y, Mureebe L, Johnson A. External validation of prognostic multivariable risk models for surgical site infections after open lower extremity revascularization for peripheral arterial disease. Surgery. 2026 Jan 23;192:110077. doi: 10.1016/j.surg.2025.110077. Epub ahead of print. PMID: 41579469.
 
 ## Support
 For questions related to this code and its use, please contact the senior auther, Dr. Adam Johnson at adam.johnson@duke.edu.
@@ -71,3 +72,4 @@ loaded via a namespace (and not attached):
 [57] knitr_1.49        rbibutils_2.3     rlang_1.1.4       Rcpp_1.0.13-1    
 [61] glue_1.8.0        renv_1.1.4        rstudioapi_0.17.1 minqa_1.2.8      
 [65] jsonlite_1.9.0    R6_2.6.1 
+
