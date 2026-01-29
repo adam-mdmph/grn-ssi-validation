@@ -10,7 +10,7 @@ The analysis is contained across 4 different .rmd files.  Below are the purpose 
 2. pad-grnssi-nsqip-2val.rmd - This file maps the variables from the previously published models and evaluates model discrimination and calibration within the NSQIP cohort.
 3. pad-grnssi-vqi-1select.rmd - This file generates the patient cohort from the original data source file provided by VQI.
 4. pad-grnssi-vqi-2val.rmd - This file maps the variables from the previously published models and evaluates model discrimination and calibration within the VQI cohort.
-5. Code folder contains scripts that are used across analysis files.  NOTE: Cleaning files that include specific variable names and definitions have been removed and will not be published publicly due to SVS PSO DUA.
+5. Code folder contains scripts that are used across analysis files.  NOTE: Cleaning files that include specific variable names and definitions have been removed and will not be published publicly because of restrictions included in the SVS VQI PSO DUA.  These can be available on request if you have a DUA in place with SVS VQI PSO.
 
 ## Data
 Data for this project was received through a data use agreement with the clinical registry owners and cannot be made publically available.
@@ -72,4 +72,5 @@ loaded via a namespace (and not attached):
 [57] knitr_1.49        rbibutils_2.3     rlang_1.1.4       Rcpp_1.0.13-1    
 [61] glue_1.8.0        renv_1.1.4        rstudioapi_0.17.1 minqa_1.2.8      
 [65] jsonlite_1.9.0    R6_2.6.1 
+
 
